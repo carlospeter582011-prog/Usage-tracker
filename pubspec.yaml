@@ -1,0 +1,14 @@
+name: data_usage_tracker
+description: On-device Wi-Fi and mobile data usage dashboard for Android.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.7.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true
