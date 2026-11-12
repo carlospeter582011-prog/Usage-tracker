@@ -11,9 +11,11 @@ An Android 6+ app built with Flutter and Dart. A Kotlin bridge reads Android's N
 
 Usage includes download and upload. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed as a single entry to avoid counting the same traffic more than once. Usage stays on the device.
 
-## Build the APK with GitHub Actions
+## Build and publish with GitHub Actions
 
-Commit the project to the repository root, including the hidden `.github` folder. A push to `main` or `master` starts **Build Android APK**, or run it manually from **Actions**. After a successful run, download **Data-Usage-Tracker** from **Artifacts**, extract the ZIP, and install `Data-Usage-Tracker.apk`. The workflow uses the Flutter template's development signing configuration for sideloading. A stable signing key is needed for reliably installing subsequent builds over an existing copy.
+Each push to the default branch starts **Build and Release Android**. After the tests and Android 6 launch check pass, the workflow publishes `Data-Usage-Tracker.apk` and `Data-Usage-Tracker.aab` together in [GitHub Releases](../../releases). Pull requests build and test both files and leave them in Actions artifacts. You can also run the workflow manually from the default branch. The release tag identifies its commit, so a rerun uses the same release.
+
+Install the APK directly on Android. The workflow uses development signing. A persistent signing key is needed for reliable in-place updates and Play Store submission.
 
 For a local Android build with Flutter 3.32.8 and JDK 17:
 
@@ -23,6 +25,7 @@ flutter pub get
 flutter analyze
 flutter test
 flutter build apk --release
+flutter build appbundle --release
 ```
 
 The preparation script regenerates the Android project from the pinned Flutter template and applies the Android manifest, launcher icon, and Kotlin bridge from `android_overlay`. The application ID is `com.carlos.data_usage_tracker`.

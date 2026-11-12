@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build and Release Android
 on:
   push:
     branches: [main, master]
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  apk:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -28,23 +28,30 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release
-      - name: Verify and name APK
+      - run: flutter build apk --release --build-number "$GITHUB_RUN_NUMBER"
+      - run: flutter build appbundle --release --build-number "$GITHUB_RUN_NUMBER"
+      - name: Verify APK and AAB
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/Data-Usage-Tracker.apk
+          cp build/app/outputs/bundle/release/*.aab dist/Data-Usage-Tracker.aab
           unzip -tq dist/Data-Usage-Tracker.apk
+          unzip -tq dist/Data-Usage-Tracker.aab
+          verification="$(LC_ALL=C jarsigner -verify dist/Data-Usage-Tracker.aab)"
+          grep -F 'jar verified.' <<< "$verification"
           sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           aapt="$(find "$sdk_root/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$aapt"
           badging="$("$aapt" dump badging dist/Data-Usage-Tracker.apk)"
           grep -Fx "sdkVersion:'23'" <<< "$badging"
           "$(dirname "$aapt")/apksigner" verify --min-sdk-version 23 dist/Data-Usage-Tracker.apk
-          sha256sum dist/Data-Usage-Tracker.apk
+          sha256sum dist/Data-Usage-Tracker.{apk,aab}
       - uses: actions/upload-artifact@v4
         with:
           name: Data-Usage-Tracker
-          path: dist/Data-Usage-Tracker.apk
+          path: |
+            dist/Data-Usage-Tracker.apk
+            dist/Data-Usage-Tracker.aab
           if-no-files-found: error
       - name: Enable hardware acceleration for Android 6 emulator
         run: |
@@ -59,3 +66,45 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash scripts/smoke-android.sh dist/Data-Usage-Tracker.apk
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    permissions:
+      contents: write
+    concurrency:
+      group: android-release-${{ github.sha }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Data-Usage-Tracker
+          path: dist
+      - name: Publish APK and AAB to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="android-${GITHUB_SHA:0:12}"
+          apk=dist/Data-Usage-Tracker.apk
+          aab=dist/Data-Usage-Tracker.aab
+          test -s "$apk" && test -s "$aab"
+
+          if release="$(gh release view "$tag" --json isDraft,assets)"; then
+            if jq -e '.isDraft == false' <<< "$release" >/dev/null; then
+              jq -e '[.assets[] | select(.state == "uploaded") | .name] | sort | . == ["Data-Usage-Tracker.aab","Data-Usage-Tracker.apk"]' <<< "$release"
+              exit 0
+            fi
+          else
+            gh release create "$tag" --draft --target "$GITHUB_SHA" \
+              --title "Data Usage Tracker · Build $GITHUB_RUN_NUMBER" \
+              --notes "Android 6+ · APK and Android App Bundle · Commit $GITHUB_SHA"
+          fi
+
+          gh release upload "$tag" "$apk" "$aab" --clobber
+          head_sha="$(gh api "repos/$GH_REPO/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
+          latest=false
+          if [[ "$head_sha" == "$GITHUB_SHA" ]]; then latest=true; fi
+          gh release edit "$tag" --draft=false --latest="$latest"
+          gh release view "$tag" --json url,assets
