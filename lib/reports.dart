@@ -8,6 +8,20 @@ import 'tracker_ui.dart';
 
 String shownBytes(int? value) => value == null ? '—' : formatBytes(value);
 
+Future<void> showUsageExplanation(BuildContext context) => showDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: Text(tr(context, 'How Android counts usage', 'أندرويد بيحسب الاستهلاك إزاي')),
+    content: Text(tr(context,
+      'Totals include downloads and uploads for the selected dates. Android records traffic in time buckets, so daily values can be approximate and recent traffic can appear later. The device total and the app list use different Android counters. Mobile data may include more than one SIM.',
+      'الأرقام بتشمل التنزيل والرفع في التواريخ المختارة. أندرويد بيسجّل الاستهلاك على فترات، فالأرقام اليومية ممكن تبقى تقريبية والاستهلاك الجديد ممكن يظهر متأخر. إجمالي الجهاز وقائمة التطبيقات بييجوا من عدّادات مختلفة، وداتا الموبايل ممكن تشمل أكتر من شريحة.')),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context),
+        child: Text(tr(context, 'Done', 'تمام'))),
+    ],
+  ),
+);
+
 class PlanEditor extends StatefulWidget {
   const PlanEditor({super.key, required this.settings});
 
@@ -375,7 +389,13 @@ class _RangeReportPageState extends State<RangeReportPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(tr(context, 'Usage reports', 'تقارير الاستهلاك'))),
+    appBar: AppBar(title: Text(tr(context, 'Usage reports', 'تقارير الاستهلاك')), actions: [
+      IconButton(
+        tooltip: tr(context, 'About usage totals', 'عن أرقام الاستهلاك'),
+        onPressed: () => showUsageExplanation(context),
+        icon: const Icon(Icons.info_outline),
+      ),
+    ]),
     body: SafeArea(child: FutureBuilder<List<Map<Network, NetworkUsage?>>>(
       future: result,
       builder: (context, snapshot) {
@@ -416,8 +436,8 @@ class _RangeReportPageState extends State<RangeReportPage> {
             ) else ...[
               Card(child: ListTile(
                 leading: Icon(network.icon, color: Theme.of(context).colorScheme.primary),
-                title: Text(tr(context, compare ? 'This week' : 'Selected period',
-                  compare ? 'الأسبوع الحالي' : 'الفترة المختارة')),
+                title: Text(tr(context, compare ? 'Device total this week' : 'Device total',
+                  compare ? 'إجمالي الجهاز الأسبوع ده' : 'إجمالي الجهاز')),
                 subtitle: Text(shownBytes(current?.total), style: Theme.of(context).textTheme.headlineSmall),
               )),
               if (compare) ListTile(title: Text(tr(context, 'Previous week', 'الأسبوع السابق')),
@@ -444,7 +464,7 @@ class _RangeReportPageState extends State<RangeReportPage> {
                     app: app,
                     service: widget.service,
                     color: Theme.of(context).colorScheme.primary,
-                    total: current.total,
+                    total: current.appTotal,
                   ),
               ] else
                 Padding(

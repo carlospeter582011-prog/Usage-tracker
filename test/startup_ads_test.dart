@@ -55,8 +55,6 @@ void main() {
             'mobile': null,
             'wifi': {'total': 0, 'apps': []},
           };
-        case 'weekly':
-          return List.generate(7, (_) => {'mobile': null, 'wifi': 0});
         default:
           return null;
       }

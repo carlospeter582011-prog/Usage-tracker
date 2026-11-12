@@ -126,7 +126,7 @@ class MainActivity : FlutterActivity() {
                                     "daily" -> daily(bounds[0], bounds[1])
                                     "mobileTotal" -> UsageMonitor.mobileTotal(this, bounds[0], bounds[1])
                                     "appHistory" -> appHistory(bounds, checkNotNull(call.argument<Number>("uid")).toInt())
-                                    else -> series(bounds)
+                                    else -> period(bounds)
                                 }
                             }
                         }
@@ -257,18 +257,22 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    private fun series(bounds: List<Long>): List<Map<String, Long?>?> {
+    private fun period(bounds: List<Long>): Map<String, Any> {
         val manager = checkNotNull(getSystemService(NetworkStatsManager::class.java))
         val now = System.currentTimeMillis()
         val subscribers = mobileSubscribers()
-        return bounds.zipWithNext { start, end ->
+        fun totals(start: Long, end: Long): Map<String, Long?> {
             val cutoff = minOf(end, now)
-            if (start >= now) null
-            else mapOf(
+            return mapOf(
                 "mobile" to subscribers?.sumOf { total(manager, ConnectivityManager.TYPE_MOBILE, it, start, cutoff) },
                 "wifi" to total(manager, ConnectivityManager.TYPE_WIFI, null, start, cutoff)
             )
         }
+        val periodTotal = totals(bounds.first(), bounds.last())
+        return mapOf(
+            "total" to periodTotal,
+            "days" to bounds.zipWithNext { start, end -> if (start >= now) null else totals(start, end) }
+        )
     }
 
     private fun total(

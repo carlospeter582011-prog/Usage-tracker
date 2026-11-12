@@ -240,7 +240,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   int goal = 0;
   int request = 0;
   Map<Network, NetworkUsage?>? dailyData;
-  List<UsageTotals?>? periodData;
+  UsagePeriod? periodData;
   DateTime? loadedPeriod;
 
   MonitorSettings monitor = const MonitorSettings();
@@ -668,8 +668,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             for (final app in data?.apps.take(3) ?? <AppUsage>[])
               ListTile(
                 title: Text(displayAppName(context, app.name)),
-                trailing: Text('${formatBytes(app.bytes)} · ${data!.total <= 0 ? '—' :
-                    '${(app.bytes * 100 / data.total).toStringAsFixed(1)}%'}'),
+                trailing: Text('${formatBytes(app.bytes)} · ${data!.appTotal <= 0 ? '—' :
+                    '${(app.bytes * 100 / data.appTotal).toStringAsFixed(1)}%'}'),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   openApp(app, day);
@@ -789,11 +789,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     ),
   );
 
-  List<int?> get series => periodData!.map((day) => day?.forNetwork(network)).toList();
-  int? get periodTotal {
-    final available = series.whereType<int>();
-    return available.isEmpty ? null : available.fold<int>(0, (total, bytes) => total + bytes);
-  }
+  List<int?> get series => periodData!.days.map((day) => day?.forNetwork(network)).toList();
+  int? get periodTotal => periodData?.total.forNetwork(network);
 
   Widget overview(BuildContext context) {
     final theme = Theme.of(context);
@@ -907,6 +904,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     final data = dailyData![network];
     final amounts = series;
     final total = periodTotal;
+    final cutoff = monthly ? DateTime(day.year, day.month + 1) : calendarDay(periodStart, 7);
+    final lastDay = calendarDay(cutoff, -1);
+    final displayedEnd = lastDay.isAfter(today) ? today : lastDay;
     final needle = query.trim().toLowerCase();
     final apps = (data?.apps ?? <AppUsage>[]).where((app) =>
         (filter == 'all' || (filter == 'system' && app.system == true) ||
@@ -927,7 +927,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             child: AppRow(
             key: ValueKey('${network.name}:${app.package}:${app.name}:$index'),
             app: app, color: accent,
-            total: math.max(data!.total, data.apps.first.bytes),
+            total: data!.appTotal,
             service: usage,
           ));
         }
@@ -942,8 +942,22 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Text('${usageLabel(total)} · ${monthly ? tr(context, 'Monthly total', 'إجمالي الشهر') : tr(context, 'Weekly total', 'إجمالي الأسبوع')}',
-                      style: TextStyle(fontWeight: FontWeight.w700, color: accent)),
+                    child: Row(children: [
+                      Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('${usageLabel(total)} · ${monthly ? tr(context, 'Monthly total', 'إجمالي الشهر') : tr(context, 'Weekly total', 'إجمالي الأسبوع')}',
+                            style: TextStyle(fontWeight: FontWeight.w700, color: accent)),
+                          Text('${dates.formatShortDate(periodStart)} – ${dates.formatShortDate(displayedEnd)}',
+                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                        ],
+                      )),
+                      IconButton(
+                        tooltip: tr(context, 'About usage totals', 'عن أرقام الاستهلاك'),
+                        onPressed: () => showUsageExplanation(context),
+                        icon: const Icon(Icons.info_outline, size: 19),
+                      ),
+                    ]),
                   ),
                   if (mobile && !monthly && goal > 0 && total != null)
                     Padding(
@@ -975,7 +989,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                         children: [
                           Text(dates.formatMediumDate(day), textAlign: TextAlign.center,
                             style: const TextStyle(fontWeight: FontWeight.w800)),
-                          Text(usageLabel(data?.total), style: TextStyle(color: scheme.onSurfaceVariant)),
+                          Text(usageLabel(data?.total), style: TextStyle(color: scheme.onSurfaceVariant),
+                            semanticsLabel: tr(context, 'Device total: ${usageLabel(data?.total)}',
+                              'إجمالي الجهاز: ${usageLabel(data?.total)}')),
                         ],
                       )),
                       IconButton(
@@ -1007,6 +1023,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             Text(tr(context, '$networkName usage by app', 'استهلاك التطبيقات · $networkName'),
               style: Theme.of(context).textTheme.titleMedium),
             if (data != null && data.apps.isNotEmpty) ...[
+              Text(tr(context, 'All recorded apps: ${formatBytes(data.appTotal)}',
+                'إجمالي التطبيقات المسجّلة: ${formatBytes(data.appTotal)}'),
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 8),
               TextFormField(
                 initialValue: query,

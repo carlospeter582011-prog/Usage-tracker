@@ -121,7 +121,10 @@ void main() {
         case 'monthly':
           final bounds = (call.arguments as Map)['bounds'] as List<Object?>;
           queries[call.method] = bounds;
-          return List.generate(bounds.length - 1, (_) => {'mobile': 10000000, 'wifi': 20000000});
+          return {
+            'total': {'mobile': 65000000, 'wifi': 130000000},
+            'days': List.generate(bounds.length - 1, (_) => {'mobile': 10000000, 'wifi': 20000000}),
+          };
         case 'goal':
           return 1000000000;
         default:
@@ -141,7 +144,8 @@ void main() {
     await tester.tap(find.text('Analyze mobile data'));
     await tester.pumpAndSettle();
     expect(queries['weekly'], hasLength(8));
-    expect(find.text('70.0 MB · Weekly total'), findsOneWidget);
+    expect(find.text('65.0 MB · Weekly total'), findsOneWidget);
+    expect(find.text('70.0 MB · Weekly total'), findsNothing);
     expect(find.text('com.example.browser'), findsOneWidget);
     await tester.tap(find.byTooltip('Back to overview'));
     await tester.pumpAndSettle();
@@ -177,7 +181,10 @@ void main() {
             'wifi': {'total': 12000000, 'apps': []},
           };
         case 'weekly':
-          return List.generate(7, (_) => {'mobile': null, 'wifi': 12000000});
+          return {
+            'total': {'mobile': null, 'wifi': 84000000},
+            'days': List.generate(7, (_) => {'mobile': null, 'wifi': 12000000}),
+          };
         case 'requestPhonePermission':
           requested = true;
           return null;
@@ -268,7 +275,10 @@ void main() {
               'wifi': {'total': 30, 'apps': []},
             };
           case 'weekly':
-            return List.generate(7, (_) => {'mobile': 20, 'wifi': 30});
+            return {
+              'total': {'mobile': 140, 'wifi': 210},
+              'days': List.generate(7, (_) => {'mobile': 20, 'wifi': 30}),
+            };
           default:
             return null;
         }

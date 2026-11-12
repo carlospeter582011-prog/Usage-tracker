@@ -55,6 +55,8 @@ class NetworkUsage {
 
   final int total;
   final List<AppUsage> apps;
+
+  late final int appTotal = apps.fold(0, (sum, app) => sum + app.bytes);
 }
 
 class UsageTotals {
@@ -69,6 +71,17 @@ class UsageTotals {
     Network.mobile => mobile,
     Network.both => null,
   };
+}
+
+class UsagePeriod {
+  UsagePeriod(Map<Object?, Object?> result)
+    : total = UsageTotals(result['total'] as Map<Object?, Object?>),
+      days = (result['days'] as List<Object?>)
+          .map((day) => day == null ? null : UsageTotals(day as Map<Object?, Object?>))
+          .toList(growable: false);
+
+  final UsageTotals total;
+  final List<UsageTotals?> days;
 }
 
 class UsageService {
@@ -103,22 +116,20 @@ class UsageService {
     };
   }
 
-  Future<List<UsageTotals?>> weekly(DateTime monday) =>
+  Future<UsagePeriod> weekly(DateTime monday) =>
       _series('weekly', monday, 7);
 
-  Future<List<UsageTotals?>> monthly(DateTime firstDay) =>
+  Future<UsagePeriod> monthly(DateTime firstDay) =>
       _series('monthly', firstDay, DateTime(firstDay.year, firstDay.month + 1, 0).day);
 
-  Future<List<UsageTotals?>> _series(String method, DateTime start, int days) async {
-    final result = (await _channel.invokeListMethod<Object?>(method, {
+  Future<UsagePeriod> _series(String method, DateTime start, int days) async {
+    final result = (await _channel.invokeMapMethod<Object?, Object?>(method, {
       'bounds': List.generate(
         days + 1,
         (index) => calendarDay(start, index).millisecondsSinceEpoch,
       ),
     }))!;
-    return result
-        .map((day) => day == null ? null : UsageTotals(day as Map<Object?, Object?>))
-        .toList(growable: false);
+    return UsagePeriod(result);
   }
 
   Future<int?> mobileTotal(DateTime start, DateTime end) =>
