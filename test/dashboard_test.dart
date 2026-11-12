@@ -1,7 +1,7 @@
 import 'package:data_usage_tracker/main.dart';
 import 'package:data_usage_tracker/usage.dart';
 import 'package:material_ui/material_ui.dart' show Brightness, MaterialApp, SizedBox, Theme, ThemeMode;
-import 'package:flutter/services.dart' show MethodChannel, Size;
+import 'package:flutter/services.dart' show MethodChannel, Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -128,18 +128,21 @@ void main() {
 
     await tester.pumpWidget(const TrackerApp());
     await tester.pumpAndSettle();
-    expect(queries['weekly'], hasLength(8));
-    expect(find.text('Used this week'), findsOneWidget);
-    expect(find.text('140 MB'), findsOneWidget);
+    expect(queries['weekly'], isNull);
     expect(find.text('90.0 MB'), findsOneWidget);
-    await tester.tap(find.text('Mobile data'));
+    expect(find.text('24.0 MB'), findsOneWidget);
+    expect(find.text('Both'), findsNothing);
+    await tester.drag(find.text('Today’s usage'), const Offset(0, -600));
     await tester.pumpAndSettle();
-    expect(find.text('70.0 MB'), findsOneWidget);
-
-    await tester.tap(find.text('View usage details'));
+    expect(find.text('Weekly'), findsNothing);
+    await tester.tap(find.text('Analyze mobile data'));
     await tester.pumpAndSettle();
+    expect(queries['weekly'], hasLength(8));
+    expect(find.text('70.0 MB · Weekly total'), findsOneWidget);
     expect(find.text('com.example.browser'), findsOneWidget);
-    await tester.tap(find.byTooltip('Switch network'));
+    await tester.tap(find.byTooltip('Back to overview'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Analyze Wi-Fi'));
     await tester.pumpAndSettle();
     expect(find.text('com.example.video'), findsOneWidget);
 
@@ -183,14 +186,50 @@ void main() {
     await tester.pumpWidget(const TrackerApp());
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
-    await tester.tap(find.text('Mobile data'));
+    await tester.tap(find.text('Analyze mobile data'));
     await tester.pumpAndSettle();
-    expect(find.text('Unavailable'), findsNWidgets(2));
+    expect(find.text('Unavailable'), findsOneWidget);
     await tester.tap(find.text('Allow mobile data access'));
     await tester.pumpAndSettle();
     expect(requested, isTrue);
-    await tester.tap(find.text('Wi-Fi'));
+    await tester.tap(find.byTooltip('Back to overview'));
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
   });
+  for (final destination in ['wifi', 'mobile', 'both']) {
+    testWidgets('opens the correct page for the $destination widget', (tester) async {
+      String? pending = destination;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        switch (call.method) {
+          case 'widgetNetwork':
+            final next = pending;
+            pending = null;
+            return next;
+          case 'hasAccess':
+            return true;
+          case 'daily':
+            return {
+              'mobile': {'total': 20, 'apps': []},
+              'wifi': {'total': 30, 'apps': []},
+            };
+          case 'weekly':
+            return List.generate(7, (_) => {'mobile': 20, 'wifi': 30});
+          default:
+            return null;
+        }
+      });
+      await tester.pumpWidget(const TrackerApp());
+      await tester.pumpAndSettle();
+      if (destination == 'both') {
+        expect(find.text('Analyze Wi-Fi'), findsOneWidget);
+        expect(find.text('Analyze mobile data'), findsOneWidget);
+        expect(find.byTooltip('Back to overview'), findsNothing);
+      } else {
+        expect(find.byTooltip('Back to overview'), findsOneWidget);
+        expect(find.text(destination == 'wifi' ? 'Wi-Fi usage by app' : 'Mobile data usage by app'),
+          findsOneWidget);
+      }
+    });
+  }
+
 }

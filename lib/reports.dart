@@ -340,8 +340,8 @@ class _RangeReportPageState extends State<RangeReportPage> {
       builder: (context, snapshot) {
         final waiting = snapshot.connectionState != ConnectionState.done;
         final values = waiting ? null : snapshot.data;
-        final current = values?.first.forNetwork(network);
-        final prior = compare && values != null ? values.last.forNetwork(network) : null;
+        final current = values?.first[network];
+        final prior = compare && values != null ? values.last[network] : null;
         final previousByApp = {for (final app in prior?.apps ?? <AppUsage>[]) app.identity: app.bytes};
         final changes = [
           if (compare && prior != null)

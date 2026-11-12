@@ -75,7 +75,7 @@ void main() {
     access.complete(true);
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(find.text('Fake top banner')).dy,
-      lessThan(tester.getTopLeft(find.text('Used this week')).dy));
+      lessThan(tester.getTopLeft(find.text('Today’s usage')).dy));
   });
 
   testWidgets('discards an ad that arrives after the dashboard is ready', (tester) async {

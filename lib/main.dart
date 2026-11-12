@@ -244,14 +244,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   DateTime? loadedPeriod;
 
   MonitorSettings monitor = const MonitorSettings();
-  bool widgetInstalled = false;
   String filter = 'all';
   String query = '';
   String sort = 'usage';
 
   bool get mobile => network == Network.mobile;
-  String get networkName => network == Network.both
-      ? tr(context, 'All networks', 'كل الشبكات') : network.label(context);
+  String get networkName => network.label(context);
   DateTime get earliest => calendarDay(mondayOf(today), -364);
   DateTime get periodStart {
     final selected = details ? day : today;
@@ -264,12 +262,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    usage.onWidgetNavigation(load);
     load();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    usage.onWidgetNavigation(null);
     super.dispose();
   }
 
@@ -291,13 +291,24 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     });
     try {
       final openedNetwork = await usage.widgetNetwork();
-      if (!mounted || ticket != request) return;
+      if (!mounted) return;
       if (openedNetwork != null) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
         setState(() {
-          network = openedNetwork;
-          details = false;
+          details = openedNetwork != Network.both;
+          network = details ? openedNetwork : Network.wifi;
+          day = today;
+          monthly = false;
+          query = '';
+          filter = 'all';
+          sort = 'usage';
         });
+        if (ticket != request) {
+          await load();
+          return;
+        }
       }
+      if (ticket != request) return;
       final allowed = await usage.hasAccess();
       if (!mounted || ticket != request) return;
       if (!allowed) {
@@ -317,11 +328,10 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       final phonePermission = await usage.needsPhonePermission();
       if (!mounted || ticket != request) return;
       final data = await usage.daily(selected);
-      final period = cached ??
-          (month ? await usage.monthly(start) : await usage.weekly(start));
+      final period = details ? cached ??
+          (month ? await usage.monthly(start) : await usage.weekly(start)) : null;
       final savedGoal = await usage.goal();
       final savedMonitor = await usage.settings();
-      final hasWidget = await usage.widgetInstalled();
       if (!mounted || ticket != request) return;
       setState(() {
         hasAccess = true;
@@ -329,10 +339,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         busy = false;
         dailyData = data;
         periodData = period;
-        loadedPeriod = start;
+        loadedPeriod = period == null ? null : start;
         goal = savedGoal;
         monitor = savedMonitor;
-        widgetInstalled = hasWidget;
       });
     } on PlatformException catch (exception) {
       if (!mounted || ticket != request) return;
@@ -358,14 +367,17 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     }
   }
 
-  void openDetails({bool yesterday = false}) {
-    if (details || busy) return;
+  void openDetails(Network selected) {
     setState(() {
-      day = yesterday ? calendarDay(today, -1) : today;
+      network = selected;
+      day = today;
       details = true;
       monthly = false;
+      query = '';
+      filter = 'all';
+      sort = 'usage';
     });
-    if (yesterday) load(reusePeriod: true);
+    load();
   }
 
   void closeDetails() {
@@ -412,7 +424,10 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       context: context, builder: (_) => GoalDialog(initialBytes: goal),
     );
     if (updated == null || !mounted) return;
-    await platformAction(() => usage.saveGoal(updated), reload: true);
+    await platformAction(() async {
+      await usage.saveGoal(updated);
+      if (mounted) setState(() => goal = updated);
+    });
   }
 
   Future<void> chooseAppearance() async {
@@ -502,6 +517,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                   title: Text(network == Network.both
                     ? tr(context, 'Wi-Fi + mobile data', 'الواي فاي + داتا الموبايل')
                     : network.label(context)),
+                  subtitle: Text(network == Network.both ? "3 × 2" : "2 × 1"),
                   trailing: const Icon(Icons.add_to_home_screen),
                   onTap: () => Navigator.pop(sheetContext, network),
                 ),
@@ -531,7 +547,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   void openReports() => Navigator.of(context).push(MaterialPageRoute<void>(
-    builder: (_) => RangeReportPage(service: usage, network: network, today: today),
+    builder: (_) => RangeReportPage(service: usage, network: Network.wifi, today: today),
   ));
 
   void openApp(AppUsage app, DateTime date) => Navigator.of(context).push(MaterialPageRoute<void>(
@@ -608,9 +624,69 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     );
   }
 
-  void switchNetwork() => setState(() {
-    network = mobile ? Network.wifi : Network.mobile;
-  });
+  void openPlan() => Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (_) => StatefulBuilder(builder: (context, update) => Scaffold(
+      appBar: AppBar(title: Text(tr(context, 'Mobile data plan', 'باقة الموبايل'))),
+      body: SafeArea(child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PlanSummary(settings: monitor, service: usage, today: today, revision: request,
+            onEdit: () async {
+              await editPlan();
+              if (context.mounted) update(() {});
+            }),
+          ListTile(
+            leading: const Icon(Icons.flag_outlined),
+            title: Text(tr(context, 'Weekly mobile limit', 'الحد الأسبوعي للداتا')),
+            subtitle: goal > 0 ? Text(formatBytes(goal)) : null,
+            trailing: const Icon(Icons.edit_outlined),
+            onTap: () async {
+              await editGoal();
+              if (context.mounted) update(() {});
+            },
+          ),
+        ],
+      )),
+    )),
+  ));
+
+  void openAppHighlights() {
+    final data = dailyData?[network];
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(tr(context, 'Top apps', 'أعلى التطبيقات استهلاكًا'),
+              style: Theme.of(context).textTheme.titleMedium),
+            if (data == null || data.apps.isEmpty)
+              Text(tr(context, 'No app activity for this day.', 'مفيش استهلاك للتطبيقات في اليوم ده.')),
+            for (final app in data?.apps.take(3) ?? <AppUsage>[])
+              ListTile(
+                title: Text(displayAppName(context, app.name)),
+                trailing: Text('${formatBytes(app.bytes)} · ${data!.total <= 0 ? '—' :
+                    '${(app.bytes * 100 / data.total).toStringAsFixed(1)}%'}'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  openApp(app, day);
+                },
+              ),
+            const SizedBox(height: 12),
+            Text(tr(context, 'Pinned apps', 'التطبيقات المثبّتة'),
+              style: Theme.of(context).textTheme.titleMedium),
+            if (monitor.pinned.isEmpty)
+              Text(tr(context, 'Pin an app from its usage history.', 'ثبّت أي تطبيق من صفحة سجل استهلاكه.')),
+            for (final pin in monitor.pinned)
+              pinnedTile(sheetContext, pin, data),
+          ],
+        ),
+      )),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -635,11 +711,11 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
               ]),
         actions: [
-          if (hasAccess || !details)
+          if (!details || (hasAccess && !busy && error == null))
             IconButton(
-              tooltip: details ? tr(context, 'Switch network', 'بدّل الشبكة') : tr(context, 'Settings', 'الإعدادات'),
-              onPressed: details ? switchNetwork : showSettings,
-              icon: Icon(details ? (mobile ? Icons.wifi : Icons.signal_cellular_alt) : Icons.settings),
+              tooltip: details ? tr(context, 'App highlights', 'أهم التطبيقات') : tr(context, 'Settings', 'الإعدادات'),
+              onPressed: details ? openAppHighlights : showSettings,
+              icon: Icon(details ? Icons.star_outline : Icons.settings),
             ),
         ],
       ),
@@ -720,155 +796,83 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Widget overview(BuildContext context) {
-    final data = dailyData!.forNetwork(network);
-    final bytes = data?.total;
-    final weekTotal = periodTotal;
-    final scheme = Theme.of(context).colorScheme;
-    final accent = mobile ? scheme.secondary : scheme.primary;
-    return NotificationListener<OverscrollNotification>(
-      onNotification: (event) {
-        if (event.overscroll > 3 && event.dragDetails != null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) openDetails();
-          });
-        }
-        return false;
-      },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Text(tr(context, 'Choose what to analyze', 'اختار عايز تحلّل إيه'),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          NetworkChoices(selected: network, onChanged: (value) => setState(() => network = value)),
-          const SizedBox(height: 14),
-          surface(context, child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: LayoutBuilder(builder: (context, constraints) {
-              final compact = constraints.maxWidth < 250 ||
-                  MediaQuery.textScalerOf(context).scale(16) > 22;
-              final metric = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(tr(context, 'Used this week', 'استهلاك الأسبوع'), style: TextStyle(color: scheme.onSurfaceVariant)),
-                  const SizedBox(height: 4),
-                  Text(usageLabel(weekTotal), style: Theme.of(context).textTheme.headlineMedium
-                    ?.copyWith(fontWeight: FontWeight.w800)),
-                  if (mobile && goal > 0 && weekTotal != null)
-                    Text(
-                      weekTotal > goal
-                          ? tr(context, '${formatBytes(weekTotal - goal)} over weekly limit',
-                          '${formatBytes(weekTotal - goal)} زيادة عن الحد الأسبوعي')
-                          : tr(context, '${formatBytes(goal - weekTotal)} left this week',
-                              'المتبقي الأسبوع ده ${formatBytes(goal - weekTotal)}'),
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
-                ],
-              );
-              final hasLimit = mobile && goal > 0;
-              final ring = Tooltip(
-                message: hasLimit
-                  ? tr(context, 'Weekly mobile limit used', 'المستهلك من الحد الأسبوعي')
-                  : tr(context, "Today's share of this week's usage", 'نسبة النهارده من استهلاك الأسبوع'),
-                child: SizedBox.square(
-                  dimension: compact ? 86 : 104,
-                  child: CustomPaint(
-                    painter: UsageRing(
-                      hasLimit ? weekTotal ?? 0 : bytes ?? 0,
-                      hasLimit ? goal : weekTotal ?? 0,
-                      accent,
-                      scheme.surfaceContainerHighest,
-                    ),
-                    child: Icon(network.icon, color: accent, size: 32),
-                  ),
-                ),
-              );
-              return compact
-                  ? Column(crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [ring, const SizedBox(height: 12), metric])
-                  : Row(children: [Expanded(child: metric), const SizedBox(width: 12), ring]);
-            }),
-          )),
-          const SizedBox(height: 10),
-          surface(context, child: ListTile(
-            leading: Icon(Icons.today_outlined, color: accent),
-            title: Text(tr(context, 'Used today', 'استهلاك النهارده')),
-            subtitle: Text(usageLabel(bytes), style: Theme.of(context).textTheme.titleLarge
-              ?.copyWith(fontWeight: FontWeight.w700)),
-          )),
-          if (network == Network.both)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Wrap(spacing: 16, runSpacing: 4, children: [
-                for (final option in [Network.wifi, Network.mobile])
-                  Text('${option.label(context)} · ${usageLabel(dailyData![option]?.total)}'),
-              ]),
-            ),
-          if (bytes == null) mobileAccessNotice(),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: openDetails,
-            icon: const Icon(Icons.insights_outlined),
-            label: Text(tr(context, 'View usage details', 'شوف تفاصيل الاستهلاك')),
-          ),
-          const SizedBox(height: 8),
-          surface(context, child: ListTile(
-            leading: const Icon(Icons.widgets_outlined),
-            title: Text(tr(context, 'Home screen widget', 'ويدجت الشاشة الرئيسية')),
-            subtitle: Text(widgetInstalled
-              ? tr(context, 'Widget added to your home screen', 'الويدجت اتضاف للشاشة الرئيسية')
-              : tr(context, 'Wi-Fi, mobile data, or both on your home screen', 'الواي فاي أو داتا الموبايل أو الاتنين على الشاشة الرئيسية')),
-            trailing: IconButton(
-              tooltip: tr(context, 'Add widget', 'ضيف الويدجت'),
-              onPressed: addWidget,
-              icon: const Icon(Icons.add_to_home_screen),
-            ),
-            onTap: addWidget,
-          )),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
-              onPressed: () => openDetails(yesterday: true),
-              icon: const Icon(Icons.history),
-              label: Text(tr(context, 'Analyze yesterday', 'حلّل استهلاك امبارح')),
-            ),
-          ),
-          PlanSummary(settings: monitor, service: usage, today: today, revision: request, onEdit: editPlan),
-          OutlinedButton.icon(
-            onPressed: openReports,
-            icon: const Icon(Icons.analytics_outlined),
-            label: Text(tr(context, 'Compare, filter by date or export', 'قارن الفترات أو اختار تاريخ أو صدّر تقرير')),
-          ),
-          if (data != null && data.apps.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(tr(context, 'Where did the data go?', 'الداتا راحت فين؟'),
-              style: Theme.of(context).textTheme.titleMedium),
-            for (final app in data.apps.take(3))
-              ListTile(
-                dense: true,
-                title: Text(displayAppName(context, app.name)),
-                trailing: Text('${formatBytes(app.bytes)} · ${data.total <= 0 ? '—' :
-                    '${(app.bytes * 100 / data.total).toStringAsFixed(1)}%'}'),
-                onTap: () => openApp(app, today),
-              ),
-          ],
-          if (monitor.pinned.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(tr(context, 'Pinned apps', 'التطبيقات المثبّتة'),
-              style: Theme.of(context).textTheme.titleMedium),
-            for (final pin in monitor.pinned)
-              pinnedTile(context, pin, data),
-          ],
-        ],
-      ),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return ListView(
+      key: const PageStorageKey('usage-home'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        Text(tr(context, 'Today’s usage', 'استهلاك النهارده'),
+          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          final tiles = [
+            analysisTile(Network.wifi, scheme.primary),
+            analysisTile(Network.mobile, scheme.secondary),
+          ];
+          if (constraints.maxWidth < 350 || MediaQuery.textScalerOf(context).scale(16) > 21) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              tiles.first, const SizedBox(height: 10), tiles.last,
+            ]);
+          }
+          return Row(children: [
+            Expanded(child: tiles.first),
+            const SizedBox(width: 12),
+            Expanded(child: tiles.last),
+          ]);
+        }),
+        const SizedBox(height: 20),
+        surface(context, child: ListTile(
+          leading: const Icon(Icons.analytics_outlined),
+          title: Text(tr(context, 'Usage reports', 'تقارير الاستهلاك')),
+          subtitle: Text(tr(context, 'Compare weeks, pick dates, or export CSV', 'قارن الأسابيع أو اختار تواريخ أو صدّر CSV')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: openReports,
+        )),
+        const SizedBox(height: 10),
+        surface(context, child: ListTile(
+          leading: const Icon(Icons.donut_large_outlined),
+          title: Text(tr(context, 'Mobile data plan', 'باقة الموبايل')),
+          subtitle: Text(tr(context, 'Balance, renewal, and alerts', 'المتبقي والتجديد والتنبيهات')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: openPlan,
+        )),
+      ],
     );
   }
 
+  Widget analysisTile(Network selected, Color accent) {
+    final theme = Theme.of(context);
+    final bytes = dailyData?[selected]?.total;
+    final label = selected == Network.wifi
+        ? tr(context, 'Analyze Wi-Fi', 'حلّل الواي فاي')
+        : tr(context, 'Analyze mobile data', 'حلّل داتا الموبايل');
+    return surface(context, child: InkWell(
+      onTap: () => openDetails(selected),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(selected.icon, color: accent),
+            const SizedBox(height: 10),
+            Text(selected.label(context), style: theme.textTheme.titleSmall),
+            Text(usageLabel(bytes),
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Text(label, style: TextStyle(color: accent, fontWeight: FontWeight.w700))),
+              Icon(Icons.chevron_right, color: accent, size: 18),
+            ]),
+          ],
+        ),
+      ),
+    ));
+  }
+
   Widget pinnedTile(BuildContext context, String pin, NetworkUsage? data) {
-    final todayApp = data?.apps.where((app) => app.identity == pin).firstOrNull;
-    final recentApp = todayApp ?? dailyData!.values
+    final selectedApp = data?.apps.where((app) => app.identity == pin).firstOrNull;
+    final recentApp = selectedApp ?? dailyData!.values
         .expand((value) => value?.apps ?? <AppUsage>[])
         .where((app) => app.identity == pin).firstOrNull;
     return ListTile(
@@ -876,17 +880,22 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       leading: const Icon(Icons.push_pin_outlined),
       title: Text(recentApp?.name ?? pin),
       subtitle: recentApp?.package == null ? null : Text(recentApp!.package!),
-      trailing: Text(data == null ? '—' : formatBytes(todayApp?.bytes ?? 0)),
-      onTap: recentApp == null ? null : () => openApp(recentApp, today),
-      onLongPress: () => platformAction(() =>
-        saveMonitor(monitor.withPins({...monitor.pinned}..remove(pin)))),
+      trailing: Text(data == null ? '—' : formatBytes(selectedApp?.bytes ?? 0)),
+      onTap: recentApp == null ? null : () {
+        Navigator.pop(context);
+        openApp(recentApp, day);
+      },
+      onLongPress: () {
+        Navigator.pop(context);
+        platformAction(() => saveMonitor(monitor.withPins({...monitor.pinned}..remove(pin))));
+      },
     );
   }
 
   Widget detailsView(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = mobile ? scheme.secondary : scheme.primary;
-    final data = dailyData!.forNetwork(network);
+    final data = dailyData![network];
     final amounts = series;
     final total = periodTotal;
     final needle = query.trim().toLowerCase();
@@ -898,6 +907,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     if (sort == 'name') apps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     if (sort == 'low') apps.sort((a, b) => a.bytes.compareTo(b.bytes));
     return ListView.builder(
+      key: ValueKey(network),
       padding: const EdgeInsets.fromLTRB(16, 5, 16, 24),
       itemCount: apps.length + 1,
       itemBuilder: (context, index) {
@@ -926,6 +936,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                     child: Text('${usageLabel(total)} · ${monthly ? tr(context, 'Monthly total', 'إجمالي الشهر') : tr(context, 'Weekly total', 'إجمالي الأسبوع')}',
                       style: TextStyle(fontWeight: FontWeight.w700, color: accent)),
                   ),
+                  if (mobile && !monthly && goal > 0 && total != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text(tr(context, '${formatBytes(total)} of ${formatBytes(goal)} weekly limit',
+                        '${formatBytes(total)} من الحد الأسبوعي ${formatBytes(goal)}')),
+                    ),
                   Wrap(
                     spacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
@@ -1052,38 +1068,6 @@ Widget surface(BuildContext context, {required Widget child}) {
     clipBehavior: Clip.antiAlias,
     child: child,
   );
-}
-
-class UsageRing extends CustomPainter {
-  UsageRing(this.bytes, this.goal, this.accent, this.track);
-
-  final int bytes;
-  final int goal;
-  final Color accent;
-  final Color track;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const stroke = 8.0;
-    final rect = (Offset.zero & size).deflate(stroke / 2 + 2);
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round
-      ..color = track;
-    const start = math.pi * .75;
-    const length = math.pi * 1.5;
-    canvas.drawArc(rect, start, length, false, paint);
-    if (bytes <= 0 || goal <= 0) return;
-    paint.color = accent;
-    final progress = math.min(bytes / goal, 1.0);
-    canvas.drawArc(rect, start, length * progress, false, paint);
-  }
-
-  @override
-  bool shouldRepaint(UsageRing oldDelegate) =>
-      bytes != oldDelegate.bytes || goal != oldDelegate.goal ||
-      accent != oldDelegate.accent || track != oldDelegate.track;
 }
 
 class PeriodChart extends StatefulWidget {

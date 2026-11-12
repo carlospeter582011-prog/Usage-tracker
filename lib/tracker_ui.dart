@@ -30,7 +30,7 @@ class NetworkChoices extends StatelessWidget {
     spacing: 8,
     runSpacing: 6,
     children: [
-      for (final network in [Network.wifi, Network.mobile, Network.both])
+      for (final network in [Network.wifi, Network.mobile])
         ChoiceChip(
           avatar: Icon(network.icon, size: 16),
           label: Text(network.label(context)),

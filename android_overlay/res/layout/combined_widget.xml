@@ -16,8 +16,19 @@
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="—" android:textColor="#FFFFFF" android:textStyle="bold"
         android:textSize="22sp" android:maxLines="1" android:ellipsize="end" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="6dp">
+        <TextView android:id="@+id/widget_wifi_usage"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="@string/widget_both_wifi" android:textColor="#BCE9E1"
+            android:textSize="12sp" android:maxLines="2" />
+        <TextView android:id="@+id/widget_mobile_usage"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="@string/widget_both_mobile" android:textColor="#FFC584"
+            android:textSize="12sp" android:maxLines="2" />
+    </LinearLayout>
     <TextView android:id="@+id/widget_plan"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="@string/widget_both_hint" android:textColor="#BCE9E1"
+        android:layout_marginTop="4dp" android:text="@string/widget_both_hint" android:textColor="#BCE9E1"
         android:textSize="11sp" android:maxLines="2" android:ellipsize="end" />
 </LinearLayout>

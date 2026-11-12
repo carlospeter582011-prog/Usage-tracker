@@ -34,15 +34,19 @@ class MainActivity : FlutterActivity() {
         override fun sizeOf(key: String, value: ByteArray) = value.size
     }
 
+    private var usageChannel: MethodChannel? = null
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.hasExtra(UsageMonitor.networkExtra)) usageChannel?.invokeMethod("widgetNavigation", null)
     }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
-        MethodChannel(engine.dartExecutor.binaryMessenger, "data_usage_tracker/usage")
-            .setMethodCallHandler { call, result ->
+        usageChannel = MethodChannel(engine.dartExecutor.binaryMessenger, "data_usage_tracker/usage")
+        usageChannel
+            ?.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "hasAccess" -> result.success(UsageMonitor.hasAccess(this))
                     "language", "monitorSettings" -> result.success(
@@ -64,7 +68,6 @@ class MainActivity : FlutterActivity() {
                         intent.removeExtra(UsageMonitor.networkExtra)
                         result.success(network)
                     }
-                    "widgetInstalled" -> result.success(UsageMonitor.widgetIds(this).isNotEmpty())
                     "notificationPermission" -> {
                         if (Build.VERSION.SDK_INT < 33 ||
                             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==

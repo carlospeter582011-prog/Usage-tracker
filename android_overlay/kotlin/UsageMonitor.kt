@@ -173,11 +173,16 @@ internal object UsageMonitor {
             }
             views.setTextViewText(R.id.widget_title, title)
             views.setTextViewText(R.id.widget_today, bytes?.let(::format) ?: "—")
+            if (network == WidgetNetwork.both) {
+                val wifiValue = wifi?.let(::format) ?: "—"
+                val mobileValue = today?.let(::format) ?: "—"
+                views.setTextViewText(R.id.widget_wifi_usage, if (ar) "واي فاي $wifiValue" else "Wi-Fi $wifiValue")
+                views.setTextViewText(R.id.widget_mobile_usage, if (ar) "داتا $mobileValue" else "Mobile data $mobileValue")
+            }
             views.setTextViewText(R.id.widget_plan, when {
                 !allowed -> if (ar) "فعّل إذن الاستخدام" else "Enable Usage access"
                 network == WidgetNetwork.both ->
-                    if (ar) "واي فاي ${wifi?.let(::format) ?: "—"} · داتا ${today?.let(::format) ?: "—"}"
-                    else "Wi-Fi ${wifi?.let(::format) ?: "—"} · Mobile ${today?.let(::format) ?: "—"}"
+                    if (ar) "اضغط لفتح الرئيسية" else "Tap to open dashboard"
                 network == WidgetNetwork.mobile && used != null ->
                     if (ar) "متبقي ${format((limit - used).coerceAtLeast(0))}"
                     else "${format((limit - used).coerceAtLeast(0))} left in plan"

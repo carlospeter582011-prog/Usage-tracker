@@ -46,8 +46,6 @@ class AppUsage {
 }
 
 class NetworkUsage {
-  NetworkUsage._(this.total, this.apps);
-
   NetworkUsage(Map<Object?, Object?> json)
     : total = json['total'] as int,
       apps = (json['apps'] as List<Object?>)
@@ -57,26 +55,6 @@ class NetworkUsage {
 
   final int total;
   final List<AppUsage> apps;
-}
-
-extension NetworkSelection on Map<Network, NetworkUsage?> {
-  NetworkUsage? forNetwork(Network network) {
-    if (network != Network.both) return this[network];
-    final wifi = this[Network.wifi];
-    final mobile = this[Network.mobile];
-    if (wifi == null || mobile == null) return null;
-    final apps = {for (final app in wifi.apps) app.identity: app};
-    for (final app in mobile.apps) {
-      final prior = apps[app.identity];
-      apps[app.identity] = prior == null ? app : AppUsage({
-        'name': app.name, 'package': app.package, 'uid': app.uid ?? prior.uid,
-        'system': app.system ?? prior.system, 'bytes': app.bytes + prior.bytes,
-        'rx': app.rx + prior.rx, 'tx': app.tx + prior.tx,
-      });
-    }
-    final sorted = apps.values.toList()..sort((a, b) => b.bytes.compareTo(a.bytes));
-    return NetworkUsage._(wifi.total + mobile.total, sorted);
-  }
 }
 
 class UsageTotals {
@@ -89,7 +67,7 @@ class UsageTotals {
   int? forNetwork(Network network) => switch (network) {
     Network.wifi => wifi,
     Network.mobile => mobile,
-    Network.both => mobile == null ? null : wifi + mobile!,
+    Network.both => null,
   };
 }
 
@@ -177,8 +155,11 @@ class UsageService {
     return Network.values.asNameMap()[name];
   }
 
-  Future<bool> widgetInstalled() async =>
-      await _channel.invokeMethod<bool>('widgetInstalled') ?? false;
+  void onWidgetNavigation(Future<void> Function()? onOpen) {
+    _channel.setMethodCallHandler(onOpen == null ? null : (call) async {
+      if (call.method == 'widgetNavigation') await onOpen();
+    });
+  }
 
   Future<bool> notificationPermission() async =>
       await _channel.invokeMethod<bool>('notificationPermission') ?? false;
