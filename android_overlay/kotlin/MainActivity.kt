@@ -47,19 +47,23 @@ class MainActivity : FlutterActivity() {
                             result.error("settings", "Could not open Usage access settings.", null)
                         }
                     }
-                    "daily", "weekly" -> {
+                    "daily", "weekly", "monthly" -> {
                         val bounds = call.argument<List<Number>>("bounds")
                             ?.map { it.toLong() }
-                        val expected = if (call.method == "daily") 2 else 8
-                        if (bounds == null || bounds.size != expected ||
+                        val expected = when (call.method) {
+                            "daily" -> 2..2
+                            "weekly" -> 8..8
+                            else -> 29..32
+                        }
+                        if (bounds == null || bounds.size !in expected ||
                             bounds.zipWithNext().any { (start, end) -> end <= start }
                         ) {
                             result.error("range", "Invalid date range.", null)
                         } else {
                             inBackground(result) {
                                 if (!hasAccess()) throw SecurityException()
-                                if (expected == 2) daily(bounds[0], bounds[1])
-                                else weekly(bounds)
+                                if (call.method == "daily") daily(bounds[0], bounds[1])
+                                else series(bounds)
                             }
                         }
                     }
@@ -181,7 +185,7 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    private fun weekly(bounds: List<Long>): List<Map<String, Long?>?> {
+    private fun series(bounds: List<Long>): List<Map<String, Long?>?> {
         val manager = checkNotNull(getSystemService(NetworkStatsManager::class.java))
         val now = System.currentTimeMillis()
         val subscribers = mobileSubscribers()

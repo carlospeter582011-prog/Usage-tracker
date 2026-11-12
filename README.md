@@ -4,8 +4,9 @@ An Android 6+ app built with Flutter and Dart. A Kotlin bridge reads Android's N
 
 ## Daily and weekly usage
 
-- **Daily** shows device-wide mobile and Wi-Fi totals. Tap either card to switch the ranked app list. Use Today, Yesterday or the date picker to open a day.
-- **Weekly** compares Monday through Sunday using mobile and Wi-Fi totals, with proportional bars and links to the daily breakdown. Navigate to earlier weeks and set an optional recurring mobile data limit.
+- **Overview** shows this week's usage in a colored ring and today's total beneath it. Switch between Wi-Fi and mobile data without leaving the screen.
+- **Details** compares days with a tappable chart for the selected week or month. Use Today, Yesterday, the chart, or the date picker to open a day. The app list shows names, package names, icons, and usage for that date and network.
+- **Settings** includes the recurring weekly mobile data limit and Android Usage access settings.
 - On Android 6–9, tap **Allow mobile data access** to grant the Phone permission used to look up active SIMs. Wi-Fi usage is available without this permission. On Android 6, cellular history is limited to the default subscription.
 - On first launch, open Android's **Usage access** screen, allow access for **Data Usage Tracker**, then return to the app.
 

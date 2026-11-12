@@ -51,7 +51,7 @@ class UsageTotals {
 
   final int? mobile;
   final int wifi;
-  int get combined => (mobile ?? 0) + wifi;
+  int? forNetwork(Network network) => network == Network.wifi ? wifi : mobile;
 }
 
 class UsageService {
@@ -83,11 +83,17 @@ class UsageService {
     };
   }
 
-  Future<List<UsageTotals?>> weekly(DateTime monday) async {
-    final result = (await _channel.invokeListMethod<Object?>('weekly', {
+  Future<List<UsageTotals?>> weekly(DateTime monday) =>
+      _series('weekly', monday, 7);
+
+  Future<List<UsageTotals?>> monthly(DateTime firstDay) =>
+      _series('monthly', firstDay, DateTime(firstDay.year, firstDay.month + 1, 0).day);
+
+  Future<List<UsageTotals?>> _series(String method, DateTime start, int days) async {
+    final result = (await _channel.invokeListMethod<Object?>(method, {
       'bounds': List.generate(
-        8,
-        (index) => calendarDay(monday, index).millisecondsSinceEpoch,
+        days + 1,
+        (index) => calendarDay(start, index).millisecondsSinceEpoch,
       ),
     }))!;
     return result

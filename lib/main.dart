@@ -2,16 +2,21 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show MissingPluginException, PlatformException;
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException, SystemUiOverlayStyle;
 
 import 'usage.dart';
 
-const background = Color(0xFF0C1624);
-const panel = Color(0xFF14263A);
-const ink = Color(0xFFF2F6FF);
-const muted = Color(0xFFA9B9D0);
-const mint = Color(0xFF5DE3BB);
-const sky = Color(0xFF9DB7FF);
+const background = Color(0xFFF6F6F9);
+const panel = Colors.white;
+const ink = Color(0xFF202237);
+const muted = Color(0xFF68738B);
+const track = Color(0xFFE9EBF2);
+const blue = Color(0xFF3B73DF);
+const colors = [
+  Color(0xFF4585F5), Color(0xFF4861F5), Color(0xFF6446F5),
+  Color(0xFF9545F4), Color(0xFFD543F0), Color(0xFFF241CC),
+];
 
 void main() => runApp(const TrackerApp());
 
@@ -23,15 +28,14 @@ class TrackerApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     title: 'Data Usage Tracker',
     theme: ThemeData(
-      colorScheme: const ColorScheme.dark(
-        primary: mint,
-        onPrimary: background,
-        secondary: sky,
-        surface: panel,
-        onSurface: ink,
-      ),
+      colorScheme: const ColorScheme.light(primary: blue, surface: panel, onSurface: ink),
       scaffoldBackgroundColor: background,
-      appBarTheme: const AppBarTheme(backgroundColor: background),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: background,
+        foregroundColor: ink,
+        scrolledUnderElevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
+      ),
       useMaterial3: true,
     ),
     home: const Dashboard(),
@@ -49,19 +53,28 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   final usage = UsageService();
   DateTime today = calendarDay(DateTime.now());
   late DateTime day = today;
-  late DateTime week = mondayOf(today);
-  Network network = Network.mobile;
-  bool weekly = false;
-  bool? hasAccess;
+  Network network = Network.wifi;
+  bool details = false;
+  bool monthly = false;
+  bool hasAccess = false;
   bool busy = true;
   bool needsPhonePermission = false;
   String? error;
   int goal = 0;
   int request = 0;
   Map<Network, NetworkUsage?>? dailyData;
-  List<UsageTotals?>? weeklyData;
+  List<UsageTotals?>? periodData;
+  DateTime? loadedPeriod;
 
+  bool get mobile => network == Network.mobile;
+  String get networkName => mobile ? 'Mobile data' : 'Wi-Fi';
   DateTime get earliest => calendarDay(mondayOf(today), -364);
+  DateTime get periodStart {
+    final selected = details ? day : today;
+    return details && monthly
+        ? DateTime(selected.year, selected.month)
+        : mondayOf(selected);
+  }
 
   @override
   void initState() {
@@ -81,14 +94,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool reusePeriod = false}) async {
     if (!mounted) return;
     final ticket = ++request;
     setState(() {
       final now = calendarDay(DateTime.now());
-      if (day == today) day = now;
-      if (week == mondayOf(today)) week = mondayOf(now);
+      if (day == today || day.isAfter(now)) day = now;
       today = now;
+      if (day.isBefore(earliest)) day = earliest;
       busy = true;
       error = null;
     });
@@ -99,23 +112,31 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         setState(() {
           hasAccess = false;
           busy = false;
+          dailyData = null;
+          periodData = null;
+          loadedPeriod = null;
         });
         return;
       }
+      final selected = details ? day : today;
+      final start = periodStart;
+      final month = details && monthly;
+      final cached = reusePeriod && loadedPeriod == start ? periodData : null;
       final phonePermission = await usage.needsPhonePermission();
       if (!mounted || ticket != request) return;
-      final showWeek = weekly;
-      final weekData = showWeek ? await usage.weekly(week) : null;
-      final dayData = showWeek ? null : await usage.daily(day);
-      final savedGoal = showWeek ? await usage.goal() : null;
+      final data = await usage.daily(selected);
+      final period = cached ??
+          (month ? await usage.monthly(start) : await usage.weekly(start));
+      final savedGoal = await usage.goal();
       if (!mounted || ticket != request) return;
       setState(() {
         hasAccess = true;
         needsPhonePermission = phonePermission;
         busy = false;
-        dailyData = dayData;
-        weeklyData = weekData;
-        if (savedGoal != null) goal = savedGoal;
+        dailyData = data;
+        periodData = period;
+        loadedPeriod = start;
+        goal = savedGoal;
       });
     } on PlatformException catch (exception) {
       if (!mounted || ticket != request) return;
@@ -136,440 +157,623 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     }
   }
 
-  void selectDay(DateTime value) {
+  void openDetails() {
+    if (details || busy) return;
     setState(() {
-      day = value;
-      week = mondayOf(value);
-      weekly = false;
+      day = today;
+      details = true;
+      monthly = false;
     });
+  }
+
+  void closeDetails() {
+    setState(() => details = false);
     load();
+  }
+
+  void selectDay(DateTime value) {
+    if (value == day || value.isBefore(earliest) || value.isAfter(today)) return;
+    setState(() => day = value);
+    load(reusePeriod: true);
+  }
+
+  void movePeriod(int direction) {
+    final target = monthly
+        ? DateTime(day.year, day.month + direction)
+        : calendarDay(day, direction * 7);
+    selectDay(target.isAfter(today) ? today : (target.isBefore(earliest) ? earliest : target));
   }
 
   Future<void> chooseDate() async {
     final selected = await showDatePicker(
-      context: context,
-      initialDate: day,
-      firstDate: earliest,
-      lastDate: today,
+      context: context, initialDate: day, firstDate: earliest, lastDate: today,
     );
     if (selected != null && mounted) selectDay(selected);
   }
 
-  Future<void> openSettings() async {
+  Future<void> platformAction(Future<void> Function() action, {bool reload = false}) async {
     try {
-      await usage.openSettings();
+      await action();
+      if (reload && mounted) load();
     } on PlatformException catch (exception) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(exception.message ?? 'Could not open settings.')),
+        SnackBar(content: Text(exception.message ?? 'Could not complete this action.')),
       );
     }
   }
 
-  Future<void> requestPhonePermission() async {
-    try {
-      await usage.requestPhonePermission();
-      if (mounted) load();
-    } on PlatformException catch (exception) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(exception.message ?? 'Could not request Phone permission.')),
-      );
-    }
+  void requestPhonePermission() => platformAction(usage.requestPhonePermission, reload: true);
+
+  Future<void> editGoal() async {
+    final updated = await showDialog<int>(
+      context: context, builder: (_) => GoalDialog(initialBytes: goal),
+    );
+    if (updated == null || !mounted) return;
+    await platformAction(() => usage.saveGoal(updated), reload: true);
   }
+
+  void showSettings() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Weekly mobile limit'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                editGoal();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('Refresh usage'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                load();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.admin_panel_settings_outlined),
+              title: const Text('Usage access settings'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                platformAction(usage.openSettings);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void switchNetwork() => setState(() {
+    network = mobile ? Network.wifi : Network.mobile;
+  });
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !details,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop && details) closeDetails();
+    },
+    child: Scaffold(
+      appBar: AppBar(
+        toolbarHeight: details ? 56 : 72,
+        centerTitle: details,
+        leading: details
+            ? IconButton(tooltip: 'Back to overview', onPressed: closeDetails,
+                icon: const Icon(Icons.arrow_downward))
+            : null,
+        title: details
+            ? Text(networkName, style: const TextStyle(fontWeight: FontWeight.w800))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Data Usage Tracker', style: TextStyle(fontWeight: FontWeight.w800)),
+                  if (hasAccess)
+                    Text('$networkName usage', style: const TextStyle(fontSize: 13, color: muted)),
+                ],
+              ),
+        actions: [
+          if (hasAccess)
+            IconButton(
+              tooltip: details ? 'Switch network' : 'Settings',
+              onPressed: details ? switchNetwork : showSettings,
+              icon: Icon(details ? (mobile ? Icons.wifi : Icons.signal_cellular_alt) : Icons.settings),
+            ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 940),
+            child: error != null
+                ? notice(Icons.error_outline, error!, 'Retry', load)
+                : !hasAccess && !busy
+                ? notice(
+                    Icons.lock_outline,
+                    'Enable Usage access for Data Usage Tracker to see network usage.',
+                    'Open Usage access settings',
+                    () => platformAction(usage.openSettings),
+                  )
+                : busy
+                ? const Center(child: CircularProgressIndicator())
+                : details ? detailsView(context) : overview(context),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget notice(IconData icon, String text, String label, VoidCallback action) =>
+      Center(child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: blue, size: 42),
+            const SizedBox(height: 12),
+            Text(text, textAlign: TextAlign.center),
+            const SizedBox(height: 14),
+            FilledButton(onPressed: action, child: Text(label)),
+          ],
+        ),
+      ));
 
   Widget mobileAccessNotice() => Padding(
-    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    padding: const EdgeInsets.symmetric(vertical: 8),
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           needsPhonePermission
               ? 'Android 6–9 needs Phone permission to read mobile data usage.'
               : 'Android could not read mobile data for an active SIM.',
           style: const TextStyle(color: muted),
+          textAlign: TextAlign.center,
         ),
         if (needsPhonePermission)
-          TextButton(
-            onPressed: requestPhonePermission,
-            child: const Text('Allow mobile data access'),
-          ),
+          TextButton(onPressed: requestPhonePermission, child: const Text('Allow mobile data access')),
       ],
     ),
   );
 
-  Future<void> editGoal() async {
-    final updated = await showDialog<int>(
-      context: context,
-      builder: (_) => GoalDialog(initialBytes: goal),
-    );
-    if (updated == null || !mounted) return;
-    try {
-      await usage.saveGoal(updated);
-      if (mounted) load();
-    } on PlatformException catch (exception) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(exception.message ?? 'Could not save limit.')),
-      );
-    }
+  List<int?> get series => periodData!.map((day) => day?.forNetwork(network)).toList();
+  int? get periodTotal {
+    final available = series.whereType<int>();
+    return available.isEmpty ? null : available.fold<int>(0, (total, bytes) => total + bytes);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Data Usage Tracker'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: busy ? null : load,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      bottomNavigationBar: hasAccess != true
-          ? null
-          : NavigationBar(
-              selectedIndex: weekly ? 1 : 0,
-              onDestinationSelected: (index) {
-                if (weekly == (index == 1)) return;
-                setState(() => weekly = index == 1);
-                load();
-              },
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.today_outlined), label: 'Daily'),
-                NavigationDestination(icon: Icon(Icons.bar_chart_rounded), label: 'Weekly'),
-              ],
-            ),
-      body: SafeArea(
-        top: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: busy
-                ? const Center(child: CircularProgressIndicator())
-                : error != null
-                ? notice(Icons.error_outline_rounded, error!, 'Retry', load)
-                : hasAccess != true
-                ? notice(
-                    Icons.lock_outline_rounded,
-                    'Enable Usage access for Data Usage Tracker in Android settings to read your network usage.',
-                    'Open Usage access settings',
-                    openSettings,
-                  )
-                : weekly
-                ? weeklyView(context)
-                : dailyView(context),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget notice(IconData icon, String message, String action, VoidCallback onTap) =>
-      Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 42, color: mint),
-              const SizedBox(height: 16),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: onTap, child: Text(action)),
-            ],
-          ),
-        ),
-      );
-
-  Widget dailyView(BuildContext context) {
-    final dates = MaterialLocalizations.of(context);
-    final data = dailyData![network];
-    final color = network == Network.mobile ? mint : sky;
-    return ListView.builder(
-      key: const PageStorageKey('daily'),
-      padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
-      itemCount: data == null || data.apps.isEmpty ? 3 : data.apps.length + 2,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Today'),
-                    selected: day == today,
-                    onSelected: (_) => selectDay(today),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Yesterday'),
-                    selected: day == calendarDay(today, -1),
-                    onSelected: (_) => selectDay(calendarDay(today, -1)),
-                  ),
-                  ActionChip(
-                    avatar: const Icon(Icons.calendar_month_outlined, size: 18),
-                    label: const Text('Pick date'),
-                    onPressed: chooseDate,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(dates.formatFullDate(day), style: const TextStyle(color: muted)),
-              const SizedBox(height: 14),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final cards = Network.values.map((type) {
-                    return totalCard(type, dailyData![type]?.total);
-                  }).toList();
-                  if (constraints.maxWidth < 310 ||
-                      MediaQuery.textScalerOf(context).scale(16) > 23) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [cards[0], const SizedBox(height: 8), cards[1]],
-                    );
-                  }
-                  return Row(
-                    children: [
-                      Expanded(child: cards[0]),
-                      const SizedBox(width: 8),
-                      Expanded(child: cards[1]),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 20),
-            ],
-          );
+  Widget overview(BuildContext context) {
+    final bytes = dailyData![network]?.total;
+    final weekTotal = periodTotal;
+    final size = (MediaQuery.sizeOf(context).width * .55).clamp(158.0, 252.0).toDouble();
+    return NotificationListener<OverscrollNotification>(
+      onNotification: (event) {
+        if (event.overscroll > 3 && event.dragDetails != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) openDetails();
+          });
         }
-        if (index == 1) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              network == Network.mobile ? 'Mobile data by app' : 'Wi-Fi usage by app',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-          );
-        }
-        if (data == null) return mobileAccessNotice();
-        if (data.apps.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'Android has no per-app records for this date and network.',
-              style: TextStyle(color: muted),
-            ),
-          );
-        }
-        final app = data.apps[index - 2];
-        return AppRow(
-          key: ValueKey('$index:${app.package}:${app.name}'),
-          app: app,
-          color: color,
-          maximum: data.apps.first.bytes,
-          service: usage,
-        );
+        return false;
       },
-    );
-  }
-
-  Widget totalCard(Network type, int? bytes) {
-    final mobile = type == Network.mobile;
-    final color = mobile ? mint : sky;
-    return Semantics(
-      selected: network == type,
-      child: Material(
-        color: panel,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: network == type ? color : Colors.transparent),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => setState(() => network = type),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(mobile ? Icons.signal_cellular_alt : Icons.wifi, color: color),
-                const SizedBox(height: 8),
-                Text(mobile ? 'Mobile data' : 'Wi-Fi', style: const TextStyle(color: muted)),
-                Text(
-                  bytes == null ? 'Unavailable' : formatBytes(bytes),
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget weeklyView(BuildContext context) {
-    final dates = MaterialLocalizations.of(context);
-    final data = weeklyData!;
-    final mobile = data.fold<int>(0, (sum, day) => sum + (day?.mobile ?? 0));
-    final mobileAvailable = data.any((day) => day?.mobile != null);
-    final wifi = data.fold<int>(0, (sum, day) => sum + (day?.wifi ?? 0));
-    final peak = data.fold<int>(1, (max, day) => math.max(max, day?.combined ?? 0));
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
-      children: [
-        Row(
-          children: [
-            IconButton.outlined(
-              tooltip: 'Previous week',
-              onPressed: week.isAfter(mondayOf(earliest))
-                  ? () {
-                      setState(() => week = calendarDay(week, -7));
-                      load();
-                    }
-                  : null,
-              icon: const Icon(Icons.chevron_left),
-            ),
-            Expanded(
-              child: Text(
-                '${dates.formatShortDate(week)} – ${dates.formatShortDate(calendarDay(week, 6))}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            IconButton.outlined(
-              tooltip: 'Next week',
-              onPressed: week.isBefore(mondayOf(today))
-                  ? () {
-                      setState(() => week = calendarDay(week, 7));
-                      load();
-                    }
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  mobileAvailable ? 'Weekly total' : 'Weekly Wi-Fi total',
-                  style: const TextStyle(color: muted),
-                ),
-                Text(formatBytes(mobile + wifi), style: Theme.of(context).textTheme.headlineMedium),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 4,
-                  children: [
-                    if (mobileAvailable)
-                      Text('Mobile ${formatBytes(mobile)}', style: const TextStyle(color: mint)),
-                    Text('Wi-Fi ${formatBytes(wifi)}', style: const TextStyle(color: sky)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (!mobileAvailable) mobileAccessNotice(),
-                if (mobileAvailable && goal > 0) ...[
-                  Text('${formatBytes(mobile)} of ${formatBytes(goal)} mobile limit'),
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: math.min(mobile / goal, 1.0),
-                    color: mobile > goal ? Colors.orangeAccent : mint,
-                  ),
-                  if (mobile > goal)
-                    Text('${formatBytes(mobile - goal)} over limit', style: const TextStyle(color: Colors.orangeAccent)),
-                  const SizedBox(height: 8),
-                ],
-                OutlinedButton.icon(
-                  onPressed: editGoal,
-                  icon: const Icon(Icons.flag_outlined),
-                  label: Text(goal == 0 ? 'Set weekly mobile limit' : 'Edit weekly mobile limit'),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 22),
-        Text('Compare days', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 6),
-        for (var index = 0; index < data.length; index++)
-          dayComparison(dates, calendarDay(week, index), data[index], peak),
-      ],
-    );
-  }
-
-  Widget dayComparison(MaterialLocalizations dates, DateTime date, UsageTotals? totals, int peak) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ListTile(
-        onTap: totals == null ? null : () => selectDay(date),
-        title: Text(dates.formatMediumDate(date)),
-        trailing: totals == null ? null : const Icon(Icons.chevron_right),
-        subtitle: totals == null
-            ? const Text('Upcoming')
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('${formatBytes(totals.combined)} ${totals.mobile == null ? 'Wi-Fi total' : 'total'}'),
-                  Wrap(
-                    spacing: 12,
-                    children: [
-                      if (totals.mobile case final int mobile)
-                        Text('Mobile ${formatBytes(mobile)}', style: const TextStyle(color: mint)),
-                      Text('Wi-Fi ${formatBytes(totals.wifi)}', style: const TextStyle(color: sky)),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  LayoutBuilder(
-                    builder: (_, size) => ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
-                      child: ColoredBox(
-                        color: background,
-                        child: Row(
+                  surface(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(22),
+                      onTap: openDetails,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
+                        child: Column(
                           children: [
-                            SizedBox(
-                              width: size.maxWidth * ((totals.mobile ?? 0) / peak),
-                              height: 8,
-                              child: const ColoredBox(color: mint),
+                            SizedBox.square(
+                              dimension: size,
+                              child: CustomPaint(
+                                painter: UsageRing(weekTotal ?? 0, mobile ? goal : 0),
+                                child: Center(child: Padding(
+                                  padding: EdgeInsets.all(size * .17),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(usageLabel(weekTotal), style: const TextStyle(
+                                          fontSize: 33, fontWeight: FontWeight.w800, color: ink)),
+                                      ),
+                                      const FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text('Used this week', style: TextStyle(color: muted)),
+                                      ),
+                                    ],
+                                  ),
+                                )),
+                              ),
                             ),
-                            SizedBox(
-                              width: size.maxWidth * (totals.wifi / peak),
-                              height: 8,
-                              child: const ColoredBox(color: sky),
-                            ),
+                            const SizedBox(height: 13),
+                            const Text('Used today', style: TextStyle(color: muted)),
+                            Text(usageLabel(bytes), style: const TextStyle(
+                              fontSize: 24, fontWeight: FontWeight.w800, color: ink)),
+                            if (bytes == null) mobileAccessNotice(),
+                            if (mobile && goal > 0 && weekTotal != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  weekTotal > goal
+                                      ? '${formatBytes(weekTotal - goal)} over weekly limit'
+                                      : '${formatBytes(goal - weekTotal)} left this week',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: muted),
+                                ),
+                              ),
                           ],
                         ),
                       ),
                     ),
                   ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: switchNetwork,
+                      child: Text(mobile ? 'Show Wi-Fi statistics' : 'Show mobile data statistics'),
+                    ),
+                  ),
                 ],
               ),
+            ),
+          ),
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextButton.icon(
+                  onPressed: openDetails,
+                  icon: const Icon(Icons.keyboard_double_arrow_up),
+                  label: const Text('Swipe up for details'),
+                  style: TextButton.styleFrom(foregroundColor: ink),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  Widget detailsView(BuildContext context) {
+    final data = dailyData![network];
+    final amounts = series;
+    final total = periodTotal;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 5, 16, 24),
+      itemCount: (data?.apps.length ?? 0) + 1,
+      itemBuilder: (context, index) {
+        if (index > 0) {
+          final app = data!.apps[index - 1];
+          return AppRow(
+            key: ValueKey('${network.name}:${app.package}:${app.name}:$index'),
+            app: app, color: colors[colors.length - 1 - ((index - 1) % colors.length)],
+            total: math.max(data.total, data.apps.first.bytes),
+            service: usage,
+          );
+        }
+        final dates = MaterialLocalizations.of(context);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Used  ${usageLabel(total)} ${monthly ? 'this month' : 'this week'}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: muted),
+            ),
+            const SizedBox(height: 8),
+            const UsageStripe(),
+            const SizedBox(height: 16),
+            surface(child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+              child: Column(
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(color: track, borderRadius: BorderRadius.circular(28)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: Row(
+                        children: [
+                          Expanded(child: periodButton('Weekly', !monthly)),
+                          Expanded(child: periodButton('Monthly', monthly)),
+                          IconButton(tooltip: 'Pick date', onPressed: chooseDate,
+                            icon: const Icon(Icons.calendar_month_outlined)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: monthly ? 'Previous month' : 'Previous week',
+                        icon: const Icon(Icons.chevron_left),
+                        onPressed: periodStart.isAfter(monthly
+                            ? DateTime(earliest.year, earliest.month) : earliest)
+                            ? () => movePeriod(-1) : null,
+                      ),
+                      Expanded(child: Column(
+                        children: [
+                          Text(dates.formatMediumDate(day), textAlign: TextAlign.center,
+                            style: const TextStyle(fontWeight: FontWeight.w800)),
+                          Text(usageLabel(data?.total), style: const TextStyle(color: muted)),
+                        ],
+                      )),
+                      IconButton(
+                        tooltip: monthly ? 'Next month' : 'Next week',
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: periodStart.isBefore(monthly
+                            ? DateTime(today.year, today.month) : mondayOf(today))
+                            ? () => movePeriod(1) : null,
+                      ),
+                    ],
+                  ),
+                  PeriodChart(
+                    start: periodStart, day: day, amounts: amounts,
+                    monthly: monthly, earliest: earliest, today: today, onDay: selectDay,
+                  ),
+                ],
+              ),
+            )),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              children: [
+                ActionChip(label: const Text('Today'), onPressed: () => selectDay(today)),
+                ActionChip(label: const Text('Yesterday'),
+                  onPressed: () => selectDay(calendarDay(today, -1))),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text('$networkName usage by app', style: Theme.of(context).textTheme.titleMedium),
+            if (data == null)
+              mobileAccessNotice()
+            else if (data.apps.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('Android has no per-app records for this date and network.',
+                  style: TextStyle(color: muted)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget periodButton(String label, bool selected) => Semantics(
+    selected: selected,
+    child: TextButton(
+      style: TextButton.styleFrom(
+        backgroundColor: selected ? panel : Colors.transparent,
+        foregroundColor: selected ? ink : muted,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      ),
+      onPressed: () {
+        if (selected) return;
+        setState(() => monthly = !monthly);
+        load();
+      },
+      child: Text(label, textAlign: TextAlign.center),
+    ),
+  );
+}
+
+String usageLabel(int? bytes) => bytes == null ? 'Unavailable' : formatBytes(bytes);
+
+Widget surface({required Widget child}) => Card(
+  margin: EdgeInsets.zero,
+  color: panel,
+  surfaceTintColor: Colors.transparent,
+  elevation: 1,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(22),
+    side: const BorderSide(color: track),
+  ),
+  clipBehavior: Clip.antiAlias,
+  child: child,
+);
+
+class UsageRing extends CustomPainter {
+  UsageRing(this.bytes, this.goal);
+
+  final int bytes;
+  final int goal;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.shortestSide * .105;
+    final circle = Offset.zero & size;
+    final rect = circle.deflate(width / 2 + 2);
+    final paint = Paint()..style = PaintingStyle.stroke
+      ..strokeWidth = width..strokeCap = StrokeCap.round..color = track;
+    canvas.drawOval(rect, paint);
+    if (bytes <= 0) return;
+    const start = -math.pi / 2 + .10;
+    const length = 2 * math.pi - .34;
+    final progress = goal > 0 ? math.min(bytes / goal, 1.0) : 1.0;
+    final sweep = length * progress;
+    for (var index = 0; index < colors.length; index++) {
+      final offset = length * index / colors.length;
+      if (offset >= sweep) break;
+      paint.color = colors[colors.length - 1 - index];
+      canvas.drawArc(rect, start + offset, math.min(length / colors.length, sweep - offset), false, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(UsageRing oldDelegate) =>
+      bytes != oldDelegate.bytes || goal != oldDelegate.goal;
+}
+
+class UsageStripe extends StatelessWidget {
+  const UsageStripe({super.key});
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(99),
+    child: SizedBox(
+      height: 20,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: blue),
+          for (var index = 0; index < colors.length; index++)
+            FractionallySizedBox(
+              alignment: Alignment.centerRight,
+              widthFactor: (colors.length - index) / colors.length,
+              child: DecoratedBox(decoration: BoxDecoration(
+                color: colors[index], borderRadius: BorderRadius.circular(99))),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class PeriodChart extends StatefulWidget {
+  const PeriodChart({
+    super.key, required this.start, required this.day, required this.amounts,
+    required this.monthly, required this.earliest, required this.today, required this.onDay,
+  });
+
+  final DateTime start;
+  final DateTime day;
+  final List<int?> amounts;
+  final bool monthly;
+  final DateTime earliest;
+  final DateTime today;
+  final ValueChanged<DateTime> onDay;
+
+  @override
+  State<PeriodChart> createState() => _PeriodChartState();
+}
+
+class _PeriodChartState extends State<PeriodChart> {
+  final controller = ScrollController();
+  static const dayWidth = 42.0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.monthly) WidgetsBinding.instance.addPostFrameCallback((_) => centerDay());
+  }
+
+  @override
+  void didUpdateWidget(PeriodChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.monthly && (widget.day != oldWidget.day || !oldWidget.monthly)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => centerDay());
+    }
+  }
+
+  void centerDay() {
+    if (!mounted || !controller.hasClients) return;
+    final position = controller.position;
+    final offset = dayWidth * (widget.day.day - .5) - position.viewportDimension / 2;
+    controller.jumpTo(offset.clamp(0.0, position.maxScrollExtent).toDouble());
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final peak = widget.amounts.whereType<int>().fold<int>(1, math.max);
+    final dates = MaterialLocalizations.of(context);
+    return LayoutBuilder(builder: (context, constraints) {
+      final height = constraints.maxWidth >= 560 ? 158.0 : 117.0;
+      final columns = List.generate(widget.amounts.length, (index) {
+        final date = calendarDay(widget.start, index);
+        final bytes = widget.amounts[index];
+        final selected = date == widget.day;
+        final enabled = !date.isAfter(widget.today) && !date.isBefore(widget.earliest);
+        final barHeight = bytes == null || bytes == 0 ? 3.0 : math.max(4.0, (height - 22) * bytes / peak);
+        final label = widget.monthly
+            ? '${date.day}'
+            : dates.narrowWeekdays[date.weekday % 7];
+        final bar = Semantics(
+          button: true, selected: selected, enabled: enabled,
+          label: '${dates.formatFullDate(date)}, ${usageLabel(bytes)}',
+          child: InkWell(
+            key: ValueKey('chart-day-${date.toIso8601String()}'),
+            onTap: enabled ? () => widget.onDay(date) : null,
+            borderRadius: BorderRadius.circular(8),
+            child: ExcludeSemantics(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: height,
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        width: widget.monthly ? 17 : 30,
+                        height: barHeight,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(5),
+                          color: bytes == null || bytes == 0 ? track : null,
+                          gradient: bytes != null && bytes > 0 ? LinearGradient(
+                            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                            colors: selected
+                                ? const [Color(0xFF27B3DE), Color(0xFF4784F5)]
+                                : const [Color(0xFFF02D91), Color(0xFFFF8066)],
+                          ) : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(label, style: TextStyle(
+                    fontSize: 12, color: selected ? blue : muted,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w400,
+                  )),
+                ],
+              ),
+            ),
+          ),
+        );
+        return widget.monthly ? SizedBox(width: dayWidth, child: bar) : Expanded(child: bar);
+      });
+      return widget.monthly
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal, controller: controller,
+              child: Row(children: columns))
+          : Row(children: columns);
+    });
   }
 }
 
 class AppRow extends StatefulWidget {
   const AppRow({
-    super.key,
-    required this.app,
-    required this.color,
-    required this.maximum,
-    required this.service,
+    super.key, required this.app, required this.color,
+    required this.total, required this.service,
   });
 
   final AppUsage app;
   final Color color;
-  final int maximum;
+  final int total;
   final UsageService service;
 
   @override
@@ -585,45 +789,54 @@ class _AppRowState extends State<AppRow> {
   @override
   Widget build(BuildContext context) {
     const fallback = Icon(Icons.apps_rounded, color: muted);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 36,
-              height: 36,
-              child: FutureBuilder<Uint8List?>(
-                future: icon,
-                builder: (_, snapshot) => snapshot.data == null
-                    ? fallback
-                    : Image.memory(snapshot.data!, errorBuilder: (_, _, _) => fallback),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: ColoredBox(
+              color: panel,
+              child: SizedBox.square(
+                dimension: 38,
+                child: FutureBuilder<Uint8List?>(
+                  future: icon,
+                  builder: (_, snapshot) => snapshot.data == null
+                      ? fallback
+                      : Image.memory(snapshot.data!, errorBuilder: (_, _, _) => fallback),
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.app.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  if (widget.app.package case final String name)
-                    Text(name, style: const TextStyle(fontSize: 12, color: muted)),
-                  const SizedBox(height: 4),
-                  Text(formatBytes(widget.app.bytes), style: TextStyle(color: widget.color)),
-                  const SizedBox(height: 5),
-                  LinearProgressIndicator(
-                    value: widget.app.bytes / widget.maximum,
-                    minHeight: 3,
-                    color: widget.color,
-                    backgroundColor: background,
-                  ),
+                  Expanded(child: Text(widget.app.name, style: const TextStyle(
+                    color: ink, fontWeight: FontWeight.w700))),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(formatBytes(widget.app.bytes),
+                    textAlign: TextAlign.end, style: const TextStyle(
+                      color: ink, fontSize: 13, fontWeight: FontWeight.w600))),
                 ],
               ),
-            ),
-          ],
-        ),
+              if (widget.app.package case final String name)
+                Text(name, style: const TextStyle(fontSize: 11, color: muted)),
+              const SizedBox(height: 7),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(9),
+                child: LinearProgressIndicator(
+                  value: widget.app.bytes / widget.total,
+                  minHeight: 4, color: widget.color, backgroundColor: track,
+                ),
+              ),
+            ],
+          )),
+        ],
       ),
     );
   }
