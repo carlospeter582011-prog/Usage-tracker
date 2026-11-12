@@ -22,7 +22,7 @@ Each push to the default branch starts **Build and Release Android**. After the 
 
 Install the APK directly on Android. The workflow uses development signing. A persistent signing key is needed for reliable in-place updates and Play Store submission.
 
-For a local Android build with Flutter 3.50.0, JDK 17, and Android SDK 37:
+For a local Android build with Flutter 3.50.0, JDK 21, and Android SDK 37:
 
 ```sh
 bash scripts/prepare-android.sh
