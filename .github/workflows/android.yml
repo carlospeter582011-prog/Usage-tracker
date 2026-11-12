@@ -34,7 +34,12 @@ jobs:
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/Data-Usage-Tracker.apk
           unzip -tq dist/Data-Usage-Tracker.apk
-          apkanalyzer manifest min-sdk dist/Data-Usage-Tracker.apk | grep -x 23
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          aapt="$(find "$sdk_root/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$aapt"
+          badging="$("$aapt" dump badging dist/Data-Usage-Tracker.apk)"
+          grep -Fx "sdkVersion:'23'" <<< "$badging"
+          "$(dirname "$aapt")/apksigner" verify --min-sdk-version 23 dist/Data-Usage-Tracker.apk
           sha256sum dist/Data-Usage-Tracker.apk
       - uses: actions/upload-artifact@v4
         with:
