@@ -1,6 +1,5 @@
 import 'package:data_usage_tracker/main.dart';
 import 'package:data_usage_tracker/usage.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
