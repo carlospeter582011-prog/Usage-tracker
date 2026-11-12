@@ -10,7 +10,7 @@ An Android 7+ app built with Flutter and Dart. A Kotlin bridge reads Android's N
 - On Android 7–9, tap **Allow mobile data access** to grant the Phone permission used to look up active SIMs. Wi-Fi usage is available without this permission.
 - On first launch, open Android's **Usage access** screen, allow access for **Data Usage Tracker**, then return to the app.
 
-Usage includes download and upload. Weekly and monthly totals come from a single Android query for the full selected period. Daily chart values can differ from the period total because Android records traffic in time buckets. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed once with one representative package. The usage shown is the total for the shared UID. Usage stays on the device.
+Usage includes download and upload. Weekly and monthly totals come from a single Android query for the full selected period. Daily views use local midnight-to-midnight boundaries, including for today. Daily chart values can differ from the period total because Android records traffic in time buckets. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed once with one representative package. The usage shown is the total for the shared UID. Usage stays on the device.
 
 ## Reports and home screen widget
 

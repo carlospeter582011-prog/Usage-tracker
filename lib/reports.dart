@@ -343,7 +343,7 @@ class _RangeReportPageState extends State<RangeReportPage> {
     final now = DateTime.now();
     final start = compare ? mondayOf(widget.today) : dates.start;
     final end = compare ? now : calendarDay(dates.end, 1);
-    final current = await widget.service.range(start, end);
+    final current = await widget.service.range(start, end, wholeDays: !compare);
     if (!compare) return [current];
     final priorEnd = DateTime(now.year, now.month, now.day - 7, now.hour, now.minute, now.second);
     final previous = await widget.service.range(calendarDay(start, -7), priorEnd);

@@ -77,8 +77,9 @@ internal object UsageMonitor {
         }
     }
 
-    fun mobileTotal(context: Context, start: Long, end: Long): Long? {
-        val cutoff = minOf(end, System.currentTimeMillis())
+    fun mobileTotal(context: Context, start: Long, end: Long, wholeDay: Boolean = false): Long? {
+        val now = System.currentTimeMillis()
+        val cutoff = if (wholeDay && start < now) end else minOf(end, now)
         val subscribers = mobileSubscribers(context) ?: return null
         if (cutoff <= start) return 0
         val manager = checkNotNull(context.getSystemService(NetworkStatsManager::class.java))
@@ -145,17 +146,18 @@ internal object UsageMonitor {
         val ar = preferences(context).getString("language", null) == "ar"
         val day = startOfDay()
         val now = System.currentTimeMillis()
+        val tomorrow = (day.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
         val cycle = cycleStart(day, renewal)
         val allowed = hasAccess(context)
         val manager = AppWidgetManager.getInstance(context)
         val installed = WidgetNetwork.entries.associateWith { manager.getAppWidgetIds(it.component(context)) }
             .filterValues { it.isNotEmpty() }
         val mobileNeeded = notify || installed.keys.any { it != WidgetNetwork.wifi }
-        val today = if (allowed && mobileNeeded) runCatching { mobileTotal(context, day.timeInMillis, now) }.getOrNull() else null
+        val today = if (allowed && mobileNeeded) runCatching { mobileTotal(context, day.timeInMillis, tomorrow, wholeDay = true) }.getOrNull() else null
         val used = if (allowed && notify && settings.optBoolean("thresholds") && limit > 0) runCatching { mobileTotal(context, cycle, now) }.getOrNull() else null
         val wifi = if (allowed && installed.keys.any { it != WidgetNetwork.mobile }) runCatching {
             val stats = checkNotNull(context.getSystemService(NetworkStatsManager::class.java))
-            val bucket = checkNotNull(stats.querySummaryForDevice(ConnectivityManager.TYPE_WIFI, null, day.timeInMillis, now))
+            val bucket = checkNotNull(stats.querySummaryForDevice(ConnectivityManager.TYPE_WIFI, null, day.timeInMillis, tomorrow))
             bucket.rxBytes + bucket.txBytes
         }.getOrNull() else null
 

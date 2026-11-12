@@ -123,7 +123,9 @@ class MainActivity : FlutterActivity() {
                             inBackground(result) {
                                 if (!UsageMonitor.hasAccess(this)) throw SecurityException()
                                 when (call.method) {
-                                    "daily" -> daily(bounds[0], bounds[1])
+                                    "daily" -> readUsage(
+                                        bounds[0], bounds[1], call.argument<Boolean>("wholeDays") == true
+                                    )
                                     "mobileTotal" -> UsageMonitor.mobileTotal(this, bounds[0], bounds[1])
                                     "appHistory" -> appHistory(bounds, checkNotNull(call.argument<Number>("uid")).toInt())
                                     else -> period(bounds)
@@ -244,9 +246,12 @@ class MainActivity : FlutterActivity() {
 
     private fun mobileSubscribers() = UsageMonitor.mobileSubscribers(this)
 
-    private fun daily(start: Long, end: Long): Map<String, Any?> {
+    private fun readUsage(start: Long, end: Long, wholeDays: Boolean): Map<String, Any?> {
         val manager = checkNotNull(getSystemService(NetworkStatsManager::class.java))
-        val cutoff = minOf(end, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        // Leave a current calendar day open through midnight so Android includes traffic
+        // collected during its stats poll, after we captured the query start time.
+        val cutoff = if (wholeDays && start < now) end else minOf(end, now)
         val packages = mutableMapOf<Int, Pair<String, String?>>()
         val mobile = mobileSubscribers()?.let { subscribers ->
             dayNetwork(manager, ConnectivityManager.TYPE_MOBILE, subscribers, start, cutoff, packages)
@@ -262,13 +267,12 @@ class MainActivity : FlutterActivity() {
         val now = System.currentTimeMillis()
         val subscribers = mobileSubscribers()
         fun totals(start: Long, end: Long): Map<String, Long?> {
-            val cutoff = minOf(end, now)
             return mapOf(
-                "mobile" to subscribers?.sumOf { total(manager, ConnectivityManager.TYPE_MOBILE, it, start, cutoff) },
-                "wifi" to total(manager, ConnectivityManager.TYPE_WIFI, null, start, cutoff)
+                "mobile" to subscribers?.sumOf { total(manager, ConnectivityManager.TYPE_MOBILE, it, start, end) },
+                "wifi" to total(manager, ConnectivityManager.TYPE_WIFI, null, start, end)
             )
         }
-        val periodTotal = totals(bounds.first(), bounds.last())
+        val periodTotal = totals(bounds.first(), minOf(bounds.last(), now))
         return mapOf(
             "total" to periodTotal,
             "days" to bounds.zipWithNext { start, end -> if (start >= now) null else totals(start, end) }
@@ -342,7 +346,7 @@ class MainActivity : FlutterActivity() {
         val now = System.currentTimeMillis()
         val mobile = mobileSubscribers()
         return bounds.zipWithNext { start, end ->
-            val cutoff = minOf(end, now)
+            val cutoff = if (start < now) end else now
             val wifiTraffic = traffic(manager, ConnectivityManager.TYPE_WIFI, listOf(null), start, cutoff, uid)[uid]
             val mobileTraffic = mobile?.let {
                 traffic(manager, ConnectivityManager.TYPE_MOBILE, it, start, cutoff, uid)[uid] ?: Traffic()

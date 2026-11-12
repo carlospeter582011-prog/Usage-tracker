@@ -102,7 +102,9 @@ void main() {
         case 'hasAccess':
           return true;
         case 'daily':
-          queries['daily'] = (call.arguments as Map)['bounds'] as List<Object?>;
+          final arguments = call.arguments as Map;
+          expect(arguments['wholeDays'], true);
+          queries['daily'] = arguments['bounds'] as List<Object?>;
           return {
             'mobile': {
               'total': 24000000,
@@ -134,6 +136,11 @@ void main() {
 
     await tester.pumpWidget(const TrackerApp());
     await tester.pumpAndSettle();
+    final currentDay = calendarDay(DateTime.now());
+    expect(queries['daily'], [
+      currentDay.millisecondsSinceEpoch,
+      calendarDay(currentDay, 1).millisecondsSinceEpoch,
+    ]);
     expect(queries['weekly'], isNull);
     expect(find.text('90.0 MB'), findsOneWidget);
     expect(find.text('24.0 MB'), findsOneWidget);
@@ -160,7 +167,10 @@ void main() {
     expect(queries['monthly'], hasLength(monthDays + 1));
     await tester.tap(find.text('Yesterday'));
     await tester.pumpAndSettle();
-    expect(queries['daily']!.first, calendarDay(today, -1).millisecondsSinceEpoch);
+    expect(queries['daily'], [
+      calendarDay(today, -1).millisecondsSinceEpoch,
+      calendarDay(today).millisecondsSinceEpoch,
+    ]);
     expect(tester.takeException(), isNull);
   });
 

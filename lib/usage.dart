@@ -99,10 +99,13 @@ class UsageService {
   Future<void> openSettings() => _channel.invokeMethod<void>('openSettings');
 
   Future<Map<Network, NetworkUsage?>> daily(DateTime day) =>
-      range(calendarDay(day), calendarDay(day, 1));
+      range(calendarDay(day), calendarDay(day, 1), wholeDays: true);
 
-  Future<Map<Network, NetworkUsage?>> range(DateTime start, DateTime end) async {
+  Future<Map<Network, NetworkUsage?>> range(DateTime start, DateTime end, {
+    bool wholeDays = false,
+  }) async {
     final result = (await _channel.invokeMapMethod<Object?, Object?>('daily', {
+      'wholeDays': wholeDays,
       'bounds': [
         start.millisecondsSinceEpoch,
         end.millisecondsSinceEpoch,
