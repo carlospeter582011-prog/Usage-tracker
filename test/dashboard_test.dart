@@ -1,6 +1,7 @@
 import 'package:data_usage_tracker/main.dart';
 import 'package:data_usage_tracker/usage.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/material.dart' show Brightness, MaterialApp, SizedBox, Theme, ThemeMode;
+import 'package:flutter/services.dart' show MethodChannel, Size;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -29,6 +30,62 @@ void main() {
     await tester.tap(find.text('Open Usage access settings'));
     await tester.pumpAndSettle();
     expect(opened, isTrue);
+  });
+
+  testWidgets('defaults to automatic and persists a manual appearance', (tester) async {
+    String? saved;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'appearance':
+          return saved;
+        case 'saveAppearance':
+          saved = (call.arguments as Map)['mode'] as String;
+          return null;
+        case 'hasAccess':
+          return false;
+        default:
+          return null;
+      }
+    });
+
+    ThemeMode appMode() => tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode;
+
+    await tester.pumpWidget(const TrackerApp());
+    await tester.pumpAndSettle();
+    expect(appMode(), ThemeMode.system);
+    final dispatcher = tester.binding.platformDispatcher;
+    addTearDown(dispatcher.clearPlatformBrightnessTestValue);
+    dispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpAndSettle();
+    expect(Theme.of(tester.element(find.byType(Dashboard))).brightness, Brightness.dark);
+    dispatcher.platformBrightnessTestValue = Brightness.light;
+    await tester.pumpAndSettle();
+    expect(Theme.of(tester.element(find.byType(Dashboard))).brightness, Brightness.light);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Automatic'), findsOneWidget);
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(saved, 'dark');
+    expect(appMode(), ThemeMode.dark);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(const TrackerApp());
+    await tester.pumpAndSettle();
+    expect(appMode(), ThemeMode.dark);
+
+    for (final choice in {'Light': ThemeMode.light, 'Automatic': ThemeMode.system}.entries) {
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Appearance'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(choice.key));
+      await tester.pumpAndSettle();
+      expect(saved, choice.value.name);
+      expect(appMode(), choice.value);
+    }
   });
 
   testWidgets('shows a weekly overview and the selected network in details', (tester) async {
@@ -75,11 +132,11 @@ void main() {
     expect(find.text('Used this week'), findsOneWidget);
     expect(find.text('140 MB'), findsOneWidget);
     expect(find.text('90.0 MB'), findsOneWidget);
-    await tester.tap(find.text('Show mobile data statistics'));
+    await tester.tap(find.text('Mobile data'));
     await tester.pumpAndSettle();
     expect(find.text('70.0 MB'), findsOneWidget);
 
-    await tester.tap(find.text('Swipe up for details'));
+    await tester.tap(find.text('View usage details'));
     await tester.pumpAndSettle();
     expect(find.text('com.example.browser'), findsOneWidget);
     await tester.tap(find.byTooltip('Switch network'));
@@ -126,13 +183,13 @@ void main() {
     await tester.pumpWidget(const TrackerApp());
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
-    await tester.tap(find.text('Show mobile data statistics'));
+    await tester.tap(find.text('Mobile data'));
     await tester.pumpAndSettle();
     expect(find.text('Unavailable'), findsNWidgets(2));
     await tester.tap(find.text('Allow mobile data access'));
     await tester.pumpAndSettle();
     expect(requested, isTrue);
-    await tester.tap(find.text('Show Wi-Fi statistics'));
+    await tester.tap(find.text('Wi-Fi'));
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
   });

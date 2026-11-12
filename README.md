@@ -4,13 +4,13 @@ An Android 6+ app built with Flutter and Dart. A Kotlin bridge reads Android's N
 
 ## Daily and weekly usage
 
-- **Overview** shows this week's usage in a colored ring and today's total beneath it. Switch between Wi-Fi and mobile data without leaving the screen.
+- **Overview** shows this week's usage alongside a network gauge and today's total in its own card. Switch between Wi-Fi and mobile data without leaving the screen.
 - **Details** compares days with a tappable chart for the selected week or month. Use Today, Yesterday, the chart, or the date picker to open a day. The app list shows names, package names, icons, and usage for that date and network.
-- **Settings** includes the recurring weekly mobile data limit and Android Usage access settings.
+- **Settings** includes the recurring weekly mobile data limit, Android Usage access settings, and a saved Automatic, Light, or Dark appearance. Automatic follows the system and is the default.
 - On Android 6–9, tap **Allow mobile data access** to grant the Phone permission used to look up active SIMs. Wi-Fi usage is available without this permission. On Android 6, cellular history is limited to the default subscription.
 - On first launch, open Android's **Usage access** screen, allow access for **Data Usage Tracker**, then return to the app.
 
-Usage includes download and upload. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed as a single entry to avoid counting the same traffic more than once. Usage stays on the device.
+Usage includes download and upload. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed once with one representative package. The usage shown is the total for the shared UID. Usage stays on the device.
 
 ## Build and publish with GitHub Actions
 

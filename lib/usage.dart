@@ -104,6 +104,11 @@ class UsageService {
   Future<Uint8List?> icon(String package) =>
       _channel.invokeMethod<Uint8List>('icon', {'package': package});
 
+  Future<String?> appearance() => _channel.invokeMethod<String>('appearance');
+
+  Future<void> saveAppearance(String mode) =>
+      _channel.invokeMethod<void>('saveAppearance', {'mode': mode});
+
   Future<int> goal() async => await _channel.invokeMethod<int>('goal') ?? 0;
 
   Future<void> saveGoal(int bytes) =>

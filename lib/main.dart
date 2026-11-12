@@ -7,43 +7,97 @@ import 'package:flutter/services.dart'
 
 import 'usage.dart';
 
-const background = Color(0xFFF6F6F9);
-const panel = Colors.white;
-const ink = Color(0xFF202237);
-const muted = Color(0xFF68738B);
-const track = Color(0xFFE9EBF2);
-const blue = Color(0xFF3B73DF);
-const colors = [
-  Color(0xFF4585F5), Color(0xFF4861F5), Color(0xFF6446F5),
-  Color(0xFF9545F4), Color(0xFFD543F0), Color(0xFFF241CC),
-];
-
 void main() => runApp(const TrackerApp());
 
-class TrackerApp extends StatelessWidget {
+extension AppearanceLabel on ThemeMode {
+  String get label => switch (this) {
+    ThemeMode.system => 'Automatic',
+    ThemeMode.light => 'Light',
+    ThemeMode.dark => 'Dark',
+  };
+}
+
+ThemeData trackerTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF007F77),
+    brightness: brightness,
+    surface: dark ? const Color(0xFF172424) : Colors.white,
+    onSurface: dark ? const Color(0xFFE2F3EE) : const Color(0xFF152D2B),
+    primary: dark ? const Color(0xFF74DFC8) : const Color(0xFF006C62),
+    secondary: dark ? const Color(0xFFFFCD87) : const Color(0xFF8A500D),
+  );
+  final background = dark ? const Color(0xFF101919) : const Color(0xFFF1F7F5);
+  return ThemeData(
+    colorScheme: scheme,
+    scaffoldBackgroundColor: background,
+    appBarTheme: AppBarTheme(
+      backgroundColor: background,
+      foregroundColor: scheme.onSurface,
+      scrolledUnderElevation: 0,
+      systemOverlayStyle: dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+    ),
+    useMaterial3: true,
+  );
+}
+
+class TrackerApp extends StatefulWidget {
   const TrackerApp({super.key});
+
+  @override
+  State<TrackerApp> createState() => _TrackerAppState();
+}
+
+class _TrackerAppState extends State<TrackerApp> {
+  final usage = UsageService();
+  ThemeMode mode = ThemeMode.system;
+  int appearanceRevision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    restoreAppearance();
+  }
+
+  Future<void> restoreAppearance() async {
+    final revision = appearanceRevision;
+    try {
+      final stored = await usage.appearance();
+      if (!mounted || revision != appearanceRevision) return;
+      setState(() => mode = switch (stored) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      });
+    } on PlatformException {
+      // The system theme remains the default if settings cannot be read.
+    } on MissingPluginException {
+      // The dashboard reports unsupported platforms separately.
+    }
+  }
+
+  Future<void> changeAppearance(ThemeMode next) async {
+    final revision = ++appearanceRevision;
+    await usage.saveAppearance(next.name);
+    if (mounted && revision == appearanceRevision) setState(() => mode = next);
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'Data Usage Tracker',
-    theme: ThemeData(
-      colorScheme: const ColorScheme.light(primary: blue, surface: panel, onSurface: ink),
-      scaffoldBackgroundColor: background,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: background,
-        foregroundColor: ink,
-        scrolledUnderElevation: 0,
-        systemOverlayStyle: SystemUiOverlayStyle.dark,
-      ),
-      useMaterial3: true,
-    ),
-    home: const Dashboard(),
+    theme: trackerTheme(Brightness.light),
+    darkTheme: trackerTheme(Brightness.dark),
+    themeMode: mode,
+    home: Dashboard(mode: mode, onAppearanceChanged: changeAppearance),
   );
 }
 
 class Dashboard extends StatefulWidget {
-  const Dashboard({super.key});
+  const Dashboard({super.key, required this.mode, required this.onAppearanceChanged});
+
+  final ThemeMode mode;
+  final Future<void> Function(ThemeMode) onAppearanceChanged;
 
   @override
   State<Dashboard> createState() => _DashboardState();
@@ -213,6 +267,36 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     await platformAction(() => usage.saveGoal(updated), reload: true);
   }
 
+  Future<void> chooseAppearance() async {
+    final next = await showDialog<ThemeMode>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Appearance'),
+        children: [
+          for (final mode in ThemeMode.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, mode),
+              child: Row(
+                children: [
+                  Icon(switch (mode) {
+                    ThemeMode.system => Icons.brightness_auto_outlined,
+                    ThemeMode.light => Icons.light_mode_outlined,
+                    ThemeMode.dark => Icons.dark_mode_outlined,
+                  }),
+                  const SizedBox(width: 14),
+                  Expanded(child: Text(mode.label)),
+                  if (widget.mode == mode) const Icon(Icons.check, semanticLabel: 'Selected'),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (next != null && next != widget.mode && mounted) {
+      await platformAction(() => widget.onAppearanceChanged(next));
+    }
+  }
+
   void showSettings() {
     showModalBottomSheet<void>(
       context: context,
@@ -221,6 +305,15 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Appearance'),
+              subtitle: Text(widget.mode.label),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                chooseAppearance();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.flag_outlined),
               title: const Text('Weekly mobile limit'),
@@ -267,7 +360,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         centerTitle: details,
         leading: details
             ? IconButton(tooltip: 'Back to overview', onPressed: closeDetails,
-                icon: const Icon(Icons.arrow_downward))
+                icon: const Icon(Icons.arrow_back))
             : null,
         title: details
             ? Text(networkName, style: const TextStyle(fontWeight: FontWeight.w800))
@@ -276,11 +369,11 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 children: [
                   const Text('Data Usage Tracker', style: TextStyle(fontWeight: FontWeight.w800)),
                   if (hasAccess)
-                    Text('$networkName usage', style: const TextStyle(fontSize: 13, color: muted)),
+                    Text('$networkName usage', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 ],
               ),
         actions: [
-          if (hasAccess)
+          if (hasAccess || !details)
             IconButton(
               tooltip: details ? 'Switch network' : 'Settings',
               onPressed: details ? switchNetwork : showSettings,
@@ -318,7 +411,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: blue, size: 42),
+            Icon(icon, color: Theme.of(context).colorScheme.primary, size: 42),
             const SizedBox(height: 12),
             Text(text, textAlign: TextAlign.center),
             const SizedBox(height: 14),
@@ -335,7 +428,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
           needsPhonePermission
               ? 'Android 6–9 needs Phone permission to read mobile data usage.'
               : 'Android could not read mobile data for an active SIM.',
-          style: const TextStyle(color: muted),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           textAlign: TextAlign.center,
         ),
         if (needsPhonePermission)
@@ -353,7 +446,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   Widget overview(BuildContext context) {
     final bytes = dailyData![network]?.total;
     final weekTotal = periodTotal;
-    final size = (MediaQuery.sizeOf(context).width * .55).clamp(158.0, 252.0).toDouble();
+    final scheme = Theme.of(context).colorScheme;
+    final accent = mobile ? scheme.secondary : scheme.primary;
     return NotificationListener<OverscrollNotification>(
       onNotification: (event) {
         if (event.overscroll > 3 && event.dragDetails != null) {
@@ -363,92 +457,86 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         }
         return false;
       },
-      child: CustomScrollView(
+      child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  surface(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(22),
-                      onTap: openDetails,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
-                        child: Column(
-                          children: [
-                            SizedBox.square(
-                              dimension: size,
-                              child: CustomPaint(
-                                painter: UsageRing(weekTotal ?? 0, mobile ? goal : 0),
-                                child: Center(child: Padding(
-                                  padding: EdgeInsets.all(size * .17),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(usageLabel(weekTotal), style: const TextStyle(
-                                          fontSize: 33, fontWeight: FontWeight.w800, color: ink)),
-                                      ),
-                                      const FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text('Used this week', style: TextStyle(color: muted)),
-                                      ),
-                                    ],
-                                  ),
-                                )),
-                              ),
-                            ),
-                            const SizedBox(height: 13),
-                            const Text('Used today', style: TextStyle(color: muted)),
-                            Text(usageLabel(bytes), style: const TextStyle(
-                              fontSize: 24, fontWeight: FontWeight.w800, color: ink)),
-                            if (bytes == null) mobileAccessNotice(),
-                            if (mobile && goal > 0 && weekTotal != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(
-                                  weekTotal > goal
-                                      ? '${formatBytes(weekTotal - goal)} over weekly limit'
-                                      : '${formatBytes(goal - weekTotal)} left this week',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: muted),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: switchNetwork,
-                      child: Text(mobile ? 'Show Wi-Fi statistics' : 'Show mobile data statistics'),
-                    ),
-                  ),
-                ],
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              ChoiceChip(
+                avatar: const Icon(Icons.wifi, size: 18),
+                label: const Text('Wi-Fi'),
+                selected: !mobile,
+                onSelected: (_) { if (mobile) switchNetwork(); },
               ),
-            ),
+              ChoiceChip(
+                avatar: const Icon(Icons.signal_cellular_alt, size: 18),
+                label: const Text('Mobile data'),
+                selected: mobile,
+                onSelected: (_) { if (!mobile) switchNetwork(); },
+              ),
+            ],
           ),
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: TextButton.icon(
-                  onPressed: openDetails,
-                  icon: const Icon(Icons.keyboard_double_arrow_up),
-                  label: const Text('Swipe up for details'),
-                  style: TextButton.styleFrom(foregroundColor: ink),
+          const SizedBox(height: 14),
+          surface(context, child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final compact = constraints.maxWidth < 250 ||
+                  MediaQuery.textScalerOf(context).scale(16) > 22;
+              final metric = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Used this week', style: TextStyle(color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 4),
+                  Text(usageLabel(weekTotal), style: Theme.of(context).textTheme.headlineMedium
+                    ?.copyWith(fontWeight: FontWeight.w800)),
+                  if (mobile && goal > 0 && weekTotal != null)
+                    Text(
+                      weekTotal > goal
+                          ? '${formatBytes(weekTotal - goal)} over weekly limit'
+                          : '${formatBytes(goal - weekTotal)} left this week',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                ],
+              );
+              final hasLimit = mobile && goal > 0;
+              final ring = Tooltip(
+                message: hasLimit ? 'Weekly mobile limit used' : "Today's share of this week's usage",
+                child: SizedBox.square(
+                  dimension: compact ? 86 : 104,
+                  child: CustomPaint(
+                    painter: UsageRing(
+                      hasLimit ? weekTotal ?? 0 : bytes ?? 0,
+                      hasLimit ? goal : weekTotal ?? 0,
+                      accent,
+                      scheme.surfaceContainerHighest,
+                    ),
+                    child: Icon(mobile ? Icons.signal_cellular_alt : Icons.wifi, color: accent, size: 32),
+                  ),
                 ),
-              ),
-            ),
+              );
+              return compact
+                  ? Column(crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [ring, const SizedBox(height: 12), metric])
+                  : Row(children: [Expanded(child: metric), const SizedBox(width: 12), ring]);
+            }),
+          )),
+          const SizedBox(height: 10),
+          surface(context, child: ListTile(
+            leading: Icon(Icons.today_outlined, color: accent),
+            title: const Text('Used today'),
+            subtitle: Text(usageLabel(bytes), style: Theme.of(context).textTheme.titleLarge
+              ?.copyWith(fontWeight: FontWeight.w700)),
+          )),
+          if (bytes == null) mobileAccessNotice(),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            onPressed: openDetails,
+            icon: const Icon(Icons.insights_outlined),
+            label: const Text('View usage details'),
           ),
         ],
       ),
@@ -456,6 +544,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Widget detailsView(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = mobile ? scheme.secondary : scheme.primary;
     final data = dailyData![network];
     final amounts = series;
     final total = periodTotal;
@@ -467,7 +557,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
           final app = data!.apps[index - 1];
           return AppRow(
             key: ValueKey('${network.name}:${app.package}:${app.name}:$index'),
-            app: app, color: colors[colors.length - 1 - ((index - 1) % colors.length)],
+            app: app, color: accent,
             total: math.max(data.total, data.apps.first.bytes),
             service: usage,
           );
@@ -476,30 +566,25 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Used  ${usageLabel(total)} ${monthly ? 'this month' : 'this week'}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: muted),
-            ),
-            const SizedBox(height: 8),
-            const UsageStripe(),
-            const SizedBox(height: 16),
-            surface(child: Padding(
+            surface(context, child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(color: track, borderRadius: BorderRadius.circular(28)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: Row(
-                        children: [
-                          Expanded(child: periodButton('Weekly', !monthly)),
-                          Expanded(child: periodButton('Monthly', monthly)),
-                          IconButton(tooltip: 'Pick date', onPressed: chooseDate,
-                            icon: const Icon(Icons.calendar_month_outlined)),
-                        ],
-                      ),
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Text('${usageLabel(total)} · ${monthly ? 'Monthly total' : 'Weekly total'}',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: accent)),
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      periodButton('Weekly', !monthly),
+                      periodButton('Monthly', monthly),
+                      IconButton(tooltip: 'Pick date', onPressed: chooseDate,
+                        icon: const Icon(Icons.calendar_month_outlined)),
+                    ],
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -515,7 +600,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                         children: [
                           Text(dates.formatMediumDate(day), textAlign: TextAlign.center,
                             style: const TextStyle(fontWeight: FontWeight.w800)),
-                          Text(usageLabel(data?.total), style: const TextStyle(color: muted)),
+                          Text(usageLabel(data?.total), style: TextStyle(color: scheme.onSurfaceVariant)),
                         ],
                       )),
                       IconButton(
@@ -529,7 +614,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                   ),
                   PeriodChart(
                     start: periodStart, day: day, amounts: amounts,
-                    monthly: monthly, earliest: earliest, today: today, onDay: selectDay,
+                    monthly: monthly, earliest: earliest, today: today, onDay: selectDay, accent: accent,
                   ),
                 ],
               ),
@@ -548,10 +633,10 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             if (data == null)
               mobileAccessNotice()
             else if (data.apps.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 child: Text('Android has no per-app records for this date and network.',
-                  style: TextStyle(color: muted)),
+                  style: TextStyle(color: scheme.onSurfaceVariant)),
               ),
           ],
         );
@@ -559,100 +644,72 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     );
   }
 
-  Widget periodButton(String label, bool selected) => Semantics(
+  Widget periodButton(String label, bool selected) => ChoiceChip(
+    label: Text(label),
     selected: selected,
-    child: TextButton(
-      style: TextButton.styleFrom(
-        backgroundColor: selected ? panel : Colors.transparent,
-        foregroundColor: selected ? ink : muted,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      ),
-      onPressed: () {
-        if (selected) return;
-        setState(() => monthly = !monthly);
-        load();
-      },
-      child: Text(label, textAlign: TextAlign.center),
-    ),
+    onSelected: (_) {
+      if (selected) return;
+      setState(() => monthly = !monthly);
+      load();
+    },
   );
 }
 
 String usageLabel(int? bytes) => bytes == null ? 'Unavailable' : formatBytes(bytes);
 
-Widget surface({required Widget child}) => Card(
-  margin: EdgeInsets.zero,
-  color: panel,
-  surfaceTintColor: Colors.transparent,
-  elevation: 1,
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(22),
-    side: const BorderSide(color: track),
-  ),
-  clipBehavior: Clip.antiAlias,
-  child: child,
-);
+Widget surface(BuildContext context, {required Widget child}) {
+  final scheme = Theme.of(context).colorScheme;
+  return Card(
+    margin: EdgeInsets.zero,
+    color: scheme.surface,
+    surfaceTintColor: Colors.transparent,
+    elevation: 0,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: BorderSide(color: scheme.outlineVariant),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: child,
+  );
+}
 
 class UsageRing extends CustomPainter {
-  UsageRing(this.bytes, this.goal);
+  UsageRing(this.bytes, this.goal, this.accent, this.track);
 
   final int bytes;
   final int goal;
+  final Color accent;
+  final Color track;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final width = size.shortestSide * .105;
-    final circle = Offset.zero & size;
-    final rect = circle.deflate(width / 2 + 2);
-    final paint = Paint()..style = PaintingStyle.stroke
-      ..strokeWidth = width..strokeCap = StrokeCap.round..color = track;
-    canvas.drawOval(rect, paint);
-    if (bytes <= 0) return;
-    const start = -math.pi / 2 + .10;
-    const length = 2 * math.pi - .34;
-    final progress = goal > 0 ? math.min(bytes / goal, 1.0) : 1.0;
-    final sweep = length * progress;
-    for (var index = 0; index < colors.length; index++) {
-      final offset = length * index / colors.length;
-      if (offset >= sweep) break;
-      paint.color = colors[colors.length - 1 - index];
-      canvas.drawArc(rect, start + offset, math.min(length / colors.length, sweep - offset), false, paint);
-    }
+    const stroke = 8.0;
+    final rect = (Offset.zero & size).deflate(stroke / 2 + 2);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = track;
+    const start = math.pi * .75;
+    const length = math.pi * 1.5;
+    canvas.drawArc(rect, start, length, false, paint);
+    if (bytes <= 0 || goal <= 0) return;
+    paint.color = accent;
+    final progress = math.min(bytes / goal, 1.0);
+    canvas.drawArc(rect, start, length * progress, false, paint);
   }
 
   @override
   bool shouldRepaint(UsageRing oldDelegate) =>
-      bytes != oldDelegate.bytes || goal != oldDelegate.goal;
-}
-
-class UsageStripe extends StatelessWidget {
-  const UsageStripe({super.key});
-
-  @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(99),
-    child: SizedBox(
-      height: 20,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          const ColoredBox(color: blue),
-          for (var index = 0; index < colors.length; index++)
-            FractionallySizedBox(
-              alignment: Alignment.centerRight,
-              widthFactor: (colors.length - index) / colors.length,
-              child: DecoratedBox(decoration: BoxDecoration(
-                color: colors[index], borderRadius: BorderRadius.circular(99))),
-            ),
-        ],
-      ),
-    ),
-  );
+      bytes != oldDelegate.bytes || goal != oldDelegate.goal ||
+      accent != oldDelegate.accent || track != oldDelegate.track;
 }
 
 class PeriodChart extends StatefulWidget {
   const PeriodChart({
     super.key, required this.start, required this.day, required this.amounts,
     required this.monthly, required this.earliest, required this.today, required this.onDay,
+    required this.accent,
   });
 
   final DateTime start;
@@ -662,6 +719,7 @@ class PeriodChart extends StatefulWidget {
   final DateTime earliest;
   final DateTime today;
   final ValueChanged<DateTime> onDay;
+  final Color accent;
 
   @override
   State<PeriodChart> createState() => _PeriodChartState();
@@ -700,6 +758,7 @@ class _PeriodChartState extends State<PeriodChart> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final peak = widget.amounts.whereType<int>().fold<int>(1, math.max);
     final dates = MaterialLocalizations.of(context);
     return LayoutBuilder(builder: (context, constraints) {
@@ -732,21 +791,17 @@ class _PeriodChartState extends State<PeriodChart> {
                         width: widget.monthly ? 17 : 30,
                         height: barHeight,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(5),
-                          color: bytes == null || bytes == 0 ? track : null,
-                          gradient: bytes != null && bytes > 0 ? LinearGradient(
-                            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                            colors: selected
-                                ? const [Color(0xFF27B3DE), Color(0xFF4784F5)]
-                                : const [Color(0xFFF02D91), Color(0xFFFF8066)],
-                          ) : null,
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                          color: bytes == null || bytes == 0
+                              ? scheme.surfaceContainerHighest
+                              : selected ? widget.accent : widget.accent.withValues(alpha: .42),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(label, style: TextStyle(
-                    fontSize: 12, color: selected ? blue : muted,
+                    fontSize: 12, color: selected ? widget.accent : scheme.onSurfaceVariant,
                     fontWeight: selected ? FontWeight.w800 : FontWeight.w400,
                   )),
                 ],
@@ -788,7 +843,8 @@ class _AppRowState extends State<AppRow> {
 
   @override
   Widget build(BuildContext context) {
-    const fallback = Icon(Icons.apps_rounded, color: muted);
+    final scheme = Theme.of(context).colorScheme;
+    final fallback = Icon(Icons.apps_rounded, color: scheme.onSurfaceVariant);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
       child: Row(
@@ -797,7 +853,7 @@ class _AppRowState extends State<AppRow> {
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: ColoredBox(
-              color: panel,
+              color: scheme.surface,
               child: SizedBox.square(
                 dimension: 38,
                 child: FutureBuilder<Uint8List?>(
@@ -817,21 +873,21 @@ class _AppRowState extends State<AppRow> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: Text(widget.app.name, style: const TextStyle(
-                    color: ink, fontWeight: FontWeight.w700))),
+                    fontWeight: FontWeight.w700))),
                   const SizedBox(width: 8),
                   Flexible(child: Text(formatBytes(widget.app.bytes),
                     textAlign: TextAlign.end, style: const TextStyle(
-                      color: ink, fontSize: 13, fontWeight: FontWeight.w600))),
+                      fontSize: 13, fontWeight: FontWeight.w600))),
                 ],
               ),
               if (widget.app.package case final String name)
-                Text(name, style: const TextStyle(fontSize: 11, color: muted)),
+                Text(name, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 7),
               ClipRRect(
                 borderRadius: BorderRadius.circular(9),
                 child: LinearProgressIndicator(
                   value: widget.app.bytes / widget.total,
-                  minHeight: 4, color: widget.color, backgroundColor: track,
+                  minHeight: 4, color: widget.color, backgroundColor: scheme.surfaceContainerHighest,
                 ),
               ),
             ],

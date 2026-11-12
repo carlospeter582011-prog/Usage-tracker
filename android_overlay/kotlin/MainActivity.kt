@@ -72,6 +72,18 @@ class MainActivity : FlutterActivity() {
                         if (name.isNullOrBlank()) result.success(null)
                         else inBackground(result) { appIcon(name) }
                     }
+                    "appearance" -> result.success(
+                        getPreferences(MODE_PRIVATE).getString("appearance", "system")
+                    )
+                    "saveAppearance" -> {
+                        val mode = call.argument<String>("mode")
+                        if (mode !in listOf("system", "light", "dark")) {
+                            result.error("appearance", "Invalid appearance mode.", null)
+                        } else inBackground(result) {
+                            check(getPreferences(MODE_PRIVATE).edit().putString("appearance", mode).commit())
+                            null
+                        }
+                    }
                     "goal" -> result.success(
                         getPreferences(MODE_PRIVATE).getLong("mobileGoal", 0L)
                     )
@@ -229,15 +241,19 @@ class MainActivity : FlutterActivity() {
         val apps = bytesByUid.entries
             .sortedWith(compareByDescending<Map.Entry<Int, Long>> { it.value }.thenBy { it.key })
             .map { (uid, bytes) ->
-                val (name, packageNames) = packages.getOrPut(uid) { appDetails(uid) }
-                mapOf("name" to name, "package" to packageNames, "bytes" to bytes)
+                val (name, packageName) = packages.getOrPut(uid) { appDetails(uid) }
+                mapOf("name" to name, "package" to packageName, "bytes" to bytes)
             }
         return mapOf("total" to deviceTotal, "apps" to apps)
     }
 
     private fun appDetails(uid: Int): Pair<String, String?> {
         val names = packageManager.getPackagesForUid(uid).orEmpty().sorted()
-        if (names.size > 1) return "Shared Android UID" to names.joinToString(", ")
+        if (names.size > 1) {
+            val representative = names.firstOrNull { packageManager.getLaunchIntentForPackage(it) != null }
+                ?: names.first()
+            return "Shared Android UID" to representative
+        }
         val name = names.singleOrNull()
         if (name == null) return when (uid) {
             -4 -> "Removed apps" to null
