@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'feature_language.dart';
 import 'usage.dart';
+import 'tracker_ui.dart';
 
 String shownBytes(int? value) => value == null ? '—' : formatBytes(value);
 
@@ -339,8 +340,8 @@ class _RangeReportPageState extends State<RangeReportPage> {
       builder: (context, snapshot) {
         final waiting = snapshot.connectionState != ConnectionState.done;
         final values = waiting ? null : snapshot.data;
-        final current = values?.first[network];
-        final prior = compare && values != null ? values.last[network] : null;
+        final current = values?.first.forNetwork(network);
+        final prior = compare && values != null ? values.last.forNetwork(network) : null;
         final previousByApp = {for (final app in prior?.apps ?? <AppUsage>[]) app.identity: app.bytes};
         final changes = [
           if (compare && prior != null)
@@ -364,21 +365,20 @@ class _RangeReportPageState extends State<RangeReportPage> {
             ) else
               Text(tr(context, 'This week so far vs the same elapsed time last week',
                 'الأسبوع الحالي لحد دلوقتي مقابل نفس الفترة الأسبوع اللي فات')),
-            Wrap(spacing: 8, children: [
-              ChoiceChip(label: const Text('Wi-Fi'), selected: network == Network.wifi,
-                onSelected: (_) => setState(() => network = Network.wifi)),
-              ChoiceChip(label: Text(tr(context, 'Mobile data', 'داتا الموبايل')),
-                selected: network == Network.mobile,
-                onSelected: (_) => setState(() => network = Network.mobile)),
-            ]),
+            const SizedBox(height: 8),
+            NetworkChoices(selected: network, onChanged: (value) => setState(() => network = value)),
+            const SizedBox(height: 12),
             if (waiting) const LinearProgressIndicator()
             else if (values == null) ListTile(
               title: Text(tr(context, 'Could not load usage.', 'تعذّر تحميل الاستهلاك.')),
               trailing: IconButton(onPressed: () => setMode(compare), icon: const Icon(Icons.refresh)),
             ) else ...[
-              ListTile(title: Text(tr(context, compare ? 'This week' : 'Selected period',
-                compare ? 'الأسبوع الحالي' : 'الفترة المختارة')),
-                trailing: Text(shownBytes(current?.total))),
+              Card(child: ListTile(
+                leading: Icon(network.icon, color: Theme.of(context).colorScheme.primary),
+                title: Text(tr(context, compare ? 'This week' : 'Selected period',
+                  compare ? 'الأسبوع الحالي' : 'الفترة المختارة')),
+                subtitle: Text(shownBytes(current?.total), style: Theme.of(context).textTheme.headlineSmall),
+              )),
               if (compare) ListTile(title: Text(tr(context, 'Previous week', 'الأسبوع السابق')),
                 trailing: Text(shownBytes(prior?.total))),
               if (!compare) OutlinedButton.icon(
@@ -393,10 +393,25 @@ class _RangeReportPageState extends State<RangeReportPage> {
                   ListTile(title: Text(displayAppName(context, entry.$1.name)), trailing: Text('+${formatBytes(entry.$2)}')),
                 if (!changes.any((entry) => entry.$2 > 0))
                   Text(tr(context, 'No app increases available', 'مفيش زيادات متاحة للتطبيقات')),
+              ] else if (current != null && current.apps.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(tr(context, 'Usage by app', 'الاستهلاك حسب التطبيق'),
+                  style: Theme.of(context).textTheme.titleMedium),
+                for (final (index, app) in current.apps.indexed)
+                  AppRow(
+                    key: ValueKey((network, index, app.identity)),
+                    app: app,
+                    service: widget.service,
+                    color: Theme.of(context).colorScheme.primary,
+                    total: current.total,
+                  ),
               ] else
-                for (final app in current?.apps ?? <AppUsage>[])
-                  ListTile(title: Text(displayAppName(context, app.name)), subtitle: Text('↓ ${formatBytes(app.rx)}  ↑ ${formatBytes(app.tx)}'),
-                    trailing: Text(formatBytes(app.bytes))),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(current == null
+                    ? tr(context, 'Usage is unavailable for this selection.', 'بيانات الاستهلاك للاختيار ده مش متاحة.')
+                    : tr(context, 'No app activity for this period.', 'مفيش استهلاك للتطبيقات في الفترة دي.')),
+                ),
             ],
           ],
         );

@@ -18,7 +18,8 @@ Usage includes download and upload. Android controls how often data refreshes an
 - Optional notifications track 50%, 80%, and 100% and unusual mobile data use. Android schedules background checks, so updates and alerts are periodic rather than instantaneous.
 - Open an app row to see daily upload and download totals by network or pin the app to the dashboard. Search and sort by usage or name and filter system and user-installed apps.
 - Choose a custom date range, compare the current week to the same elapsed time last week, or save both networks to CSV through Android's file picker.
-- Tap the widget card on the dashboard to request adding the home screen widget. Launchers that do not offer direct pinning can add it through their widget picker.
+- Choose Wi-Fi, mobile data, or both on the dashboard and in reports. The combined view merges usage by app across both networks.
+- The dashboard widget card lets you choose a Wi-Fi, mobile data, or combined home screen widget. Each has a launcher preview and opens its matching dashboard view when tapped. Launchers without direct pinning can add the widgets through their widget picker.
 - Choose Arabic or English from Settings.
 
 ## Test advertisements

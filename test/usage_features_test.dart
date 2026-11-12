@@ -25,6 +25,22 @@ void main() {
     expect(csvField('An "app"'), '"An ""app"""');
   });
 
+  test('combined usage merges app traffic and requires both networks', () {
+    NetworkUsage traffic(int rx, int tx) => NetworkUsage({
+      'total': rx + tx,
+      'apps': [
+        {'name': 'Example', 'package': 'example.app', 'rx': rx, 'tx': tx, 'bytes': rx + tx},
+      ],
+    });
+    final data = {Network.wifi: traffic(20, 5), Network.mobile: traffic(7, 3)};
+    final both = data.forNetwork(Network.both)!;
+    expect(both.total, 35);
+    expect(both.apps.single.rx, 27);
+    expect(both.apps.single.tx, 8);
+    expect({Network.wifi: data[Network.wifi]}.forNetwork(Network.both), isNull);
+    expect(UsageTotals({'wifi': 25, 'mobile': 10}).forNetwork(Network.both), 35);
+  });
+
   test('saving pins preserves plan and alert preferences', () {
     final settings = MonitorSettings.fromJson({
       'limit': 500, 'renewal': 18, 'thresholds': true, 'spikes': true, 'pinned': ['old'],

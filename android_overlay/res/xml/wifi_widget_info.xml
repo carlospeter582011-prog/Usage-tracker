@@ -1,0 +1,11 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="160dp"
+    android:minHeight="76dp"
+    android:initialLayout="@layout/wifi_widget"
+    android:previewLayout="@layout/wifi_widget"
+    android:previewImage="@drawable/wifi_widget_preview"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

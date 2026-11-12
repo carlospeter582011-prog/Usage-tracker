@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show MethodChannel;
 
-enum Network { mobile, wifi }
+enum Network { mobile, wifi, both }
+
+const individualNetworks = [Network.mobile, Network.wifi];
 
 DateTime calendarDay(DateTime date, [int offset = 0]) =>
     DateTime(date.year, date.month, date.day + offset);
@@ -44,6 +46,8 @@ class AppUsage {
 }
 
 class NetworkUsage {
+  NetworkUsage._(this.total, this.apps);
+
   NetworkUsage(Map<Object?, Object?> json)
     : total = json['total'] as int,
       apps = (json['apps'] as List<Object?>)
@@ -55,6 +59,26 @@ class NetworkUsage {
   final List<AppUsage> apps;
 }
 
+extension NetworkSelection on Map<Network, NetworkUsage?> {
+  NetworkUsage? forNetwork(Network network) {
+    if (network != Network.both) return this[network];
+    final wifi = this[Network.wifi];
+    final mobile = this[Network.mobile];
+    if (wifi == null || mobile == null) return null;
+    final apps = {for (final app in wifi.apps) app.identity: app};
+    for (final app in mobile.apps) {
+      final prior = apps[app.identity];
+      apps[app.identity] = prior == null ? app : AppUsage({
+        'name': app.name, 'package': app.package, 'uid': app.uid ?? prior.uid,
+        'system': app.system ?? prior.system, 'bytes': app.bytes + prior.bytes,
+        'rx': app.rx + prior.rx, 'tx': app.tx + prior.tx,
+      });
+    }
+    final sorted = apps.values.toList()..sort((a, b) => b.bytes.compareTo(a.bytes));
+    return NetworkUsage._(wifi.total + mobile.total, sorted);
+  }
+}
+
 class UsageTotals {
   UsageTotals(Map<Object?, Object?> json)
     : mobile = json['mobile'] as int?,
@@ -62,7 +86,11 @@ class UsageTotals {
 
   final int? mobile;
   final int wifi;
-  int? forNetwork(Network network) => network == Network.wifi ? wifi : mobile;
+  int? forNetwork(Network network) => switch (network) {
+    Network.wifi => wifi,
+    Network.mobile => mobile,
+    Network.both => mobile == null ? null : wifi + mobile!,
+  };
 }
 
 class UsageService {
@@ -90,7 +118,7 @@ class UsageService {
       ],
     }))!;
     return {
-      for (final network in Network.values)
+      for (final network in individualNetworks)
         network: result[network.name] == null
             ? null
             : NetworkUsage(result[network.name] as Map<Object?, Object?>),
@@ -141,8 +169,13 @@ class UsageService {
   Future<void> saveLanguage(String value) =>
       _channel.invokeMethod<void>('saveLanguage', {'value': value});
 
-  Future<bool> pinWidget() async =>
-      await _channel.invokeMethod<bool>('pinWidget') ?? false;
+  Future<bool> pinWidget(Network network) async =>
+      await _channel.invokeMethod<bool>('pinWidget', {'network': network.name}) ?? false;
+
+  Future<Network?> widgetNetwork() async {
+    final name = await _channel.invokeMethod<String>('widgetNetwork');
+    return Network.values.asNameMap()[name];
+  }
 
   Future<bool> widgetInstalled() async =>
       await _channel.invokeMethod<bool>('widgetInstalled') ?? false;
@@ -228,7 +261,7 @@ String usageCsv(
   final rows = <List<Object>>[
     ['start_date', 'end_date', 'network', 'app', 'package', 'download_bytes',
       'upload_bytes', 'total_bytes'],
-    for (final network in Network.values)
+    for (final network in individualNetworks)
       if (data[network] case final NetworkUsage values) ...[
         [start, end, network.name, 'Device total', '', '', '', values.total],
         for (final app in values.apps)

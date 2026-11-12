@@ -34,6 +34,11 @@ class MainActivity : FlutterActivity() {
         override fun sizeOf(key: String, value: ByteArray) = value.size
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         MethodChannel(engine.dartExecutor.binaryMessenger, "data_usage_tracker/usage")
@@ -53,7 +58,12 @@ class MainActivity : FlutterActivity() {
                             null
                         }
                     }
-                    "pinWidget" -> result.success(UsageMonitor.pinWidget(this))
+                    "pinWidget" -> result.success(UsageMonitor.pinWidget(this, call.argument<String>("network")))
+                    "widgetNetwork" -> {
+                        val network = intent.getStringExtra(UsageMonitor.networkExtra)
+                        intent.removeExtra(UsageMonitor.networkExtra)
+                        result.success(network)
+                    }
                     "widgetInstalled" -> result.success(UsageMonitor.widgetIds(this).isNotEmpty())
                     "notificationPermission" -> {
                         if (Build.VERSION.SDK_INT < 33 ||

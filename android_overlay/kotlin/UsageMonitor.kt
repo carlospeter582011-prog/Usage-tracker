@@ -19,6 +19,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
@@ -28,8 +29,20 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.Executors
 
+internal enum class WidgetNetwork(
+    val provider: Class<out AppWidgetProvider>,
+    val layout: Int,
+) {
+    mobile(UsageWidget::class.java, R.layout.usage_widget),
+    wifi(WifiUsageWidget::class.java, R.layout.wifi_widget),
+    both(CombinedUsageWidget::class.java, R.layout.combined_widget);
+
+    fun component(context: Context) = ComponentName(context, provider)
+}
+
 @Suppress("DEPRECATION")
 internal object UsageMonitor {
+    const val networkExtra = "widget_network"
     private const val jobId = 4307
     private const val channelId = "usage_alerts"
     val worker = Executors.newSingleThreadExecutor()
@@ -77,14 +90,20 @@ internal object UsageMonitor {
         }
     }
 
-    fun widgetIds(context: Context): IntArray = AppWidgetManager.getInstance(context)
-        .getAppWidgetIds(ComponentName(context, UsageWidget::class.java))
-
-    fun pinWidget(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < 26) return false
+    fun widgetIds(context: Context): List<Int> {
         val manager = AppWidgetManager.getInstance(context)
-        return manager.isRequestPinAppWidgetSupported &&
-            manager.requestPinAppWidget(ComponentName(context, UsageWidget::class.java), null, null)
+        return WidgetNetwork.entries.flatMap { manager.getAppWidgetIds(it.component(context)).asList() }
+    }
+
+    fun pinWidget(context: Context, selection: String?): Boolean {
+        if (Build.VERSION.SDK_INT < 26) return false
+        val network = WidgetNetwork.entries.firstOrNull { it.name == selection } ?: return false
+        val manager = AppWidgetManager.getInstance(context)
+        if (!manager.isRequestPinAppWidgetSupported) return false
+        val extras = Bundle().apply {
+            putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW, RemoteViews(context.packageName, network.layout))
+        }
+        return manager.requestPinAppWidget(network.component(context), extras, null)
     }
 
     private fun config(context: Context) =
@@ -120,7 +139,6 @@ internal object UsageMonitor {
     }
 
     fun refresh(context: Context, notify: Boolean = false) {
-        val ids = widgetIds(context)
         val settings = config(context)
         val limit = settings.optLong("limit").coerceAtLeast(0)
         val renewal = settings.optInt("renewal", 1).coerceIn(1, 31)
@@ -129,20 +147,44 @@ internal object UsageMonitor {
         val now = System.currentTimeMillis()
         val cycle = cycleStart(day, renewal)
         val allowed = hasAccess(context)
-        val today = if (allowed) runCatching { mobileTotal(context, day.timeInMillis, now) }.getOrNull() else null
-        val used = if (allowed && limit > 0) runCatching { mobileTotal(context, cycle, now) }.getOrNull() else null
-        if (ids.isNotEmpty()) {
-            val views = RemoteViews(context.packageName, R.layout.usage_widget)
-            views.setTextViewText(R.id.widget_title, if (ar) "استهلاك الداتا اليوم" else "Mobile data today")
-            views.setTextViewText(R.id.widget_today, today?.let(::format) ?: "—")
+        val manager = AppWidgetManager.getInstance(context)
+        val installed = WidgetNetwork.entries.associateWith { manager.getAppWidgetIds(it.component(context)) }
+            .filterValues { it.isNotEmpty() }
+        val mobileNeeded = notify || installed.keys.any { it != WidgetNetwork.wifi }
+        val today = if (allowed && mobileNeeded) runCatching { mobileTotal(context, day.timeInMillis, now) }.getOrNull() else null
+        val used = if (allowed && mobileNeeded && limit > 0) runCatching { mobileTotal(context, cycle, now) }.getOrNull() else null
+        val wifi = if (allowed && installed.keys.any { it != WidgetNetwork.mobile }) runCatching {
+            val stats = checkNotNull(context.getSystemService(NetworkStatsManager::class.java))
+            val bucket = checkNotNull(stats.querySummaryForDevice(ConnectivityManager.TYPE_WIFI, null, day.timeInMillis, now))
+            bucket.rxBytes + bucket.txBytes
+        }.getOrNull() else null
+
+        for ((network, ids) in installed) {
+            val views = RemoteViews(context.packageName, network.layout)
+            val title = when (network) {
+                WidgetNetwork.mobile -> if (ar) "داتا الموبايل اليوم" else "Mobile data today"
+                WidgetNetwork.wifi -> if (ar) "الواي فاي اليوم" else "Wi-Fi today"
+                WidgetNetwork.both -> if (ar) "إجمالي الاستهلاك اليوم" else "Total usage today"
+            }
+            val bytes = when (network) {
+                WidgetNetwork.mobile -> today
+                WidgetNetwork.wifi -> wifi
+                WidgetNetwork.both -> if (today != null && wifi != null) today + wifi else null
+            }
+            views.setTextViewText(R.id.widget_title, title)
+            views.setTextViewText(R.id.widget_today, bytes?.let(::format) ?: "—")
             views.setTextViewText(R.id.widget_plan, when {
                 !allowed -> if (ar) "فعّل إذن الاستخدام" else "Enable Usage access"
-                used != null -> if (ar) "متبقي ${format((limit - used).coerceAtLeast(0))}"
+                network == WidgetNetwork.both ->
+                    if (ar) "واي فاي ${wifi?.let(::format) ?: "—"} · داتا ${today?.let(::format) ?: "—"}"
+                    else "Wi-Fi ${wifi?.let(::format) ?: "—"} · Mobile ${today?.let(::format) ?: "—"}"
+                network == WidgetNetwork.mobile && used != null ->
+                    if (ar) "متبقي ${format((limit - used).coerceAtLeast(0))}"
                     else "${format((limit - used).coerceAtLeast(0))} left in plan"
                 else -> if (ar) "اضغط لفتح التطبيق" else "Tap to view usage"
             })
-            views.setOnClickPendingIntent(R.id.widget_container, appIntent(context))
-            AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
+            views.setOnClickPendingIntent(R.id.widget_container, appIntent(context, network))
+            manager.updateAppWidget(ids, views)
         }
         if (!notify || !allowed || !canNotify(context)) return
         val prefs = preferences(context)
@@ -177,8 +219,11 @@ internal object UsageMonitor {
             PackageManager.PERMISSION_GRANTED) &&
             context.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() == true
 
-    private fun appIntent(context: Context) = PendingIntent.getActivity(
-        context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+    private fun appIntent(context: Context, network: WidgetNetwork? = null) = PendingIntent.getActivity(
+        context, (network?.ordinal ?: -1) + 1, Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            network?.let { putExtra(networkExtra, it.name) }
+        }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
     private fun send(context: Context, id: Int, message: String, ar: Boolean) {
@@ -201,7 +246,7 @@ internal object UsageMonitor {
     }
 }
 
-class UsageWidget : AppWidgetProvider() {
+open class UsageWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         UsageMonitor.schedule(context)
         val pending = goAsync()
@@ -212,6 +257,10 @@ class UsageWidget : AppWidgetProvider() {
 
     override fun onDisabled(context: Context) = UsageMonitor.schedule(context)
 }
+
+class WifiUsageWidget : UsageWidget()
+
+class CombinedUsageWidget : UsageWidget()
 
 class UsageMonitorJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {

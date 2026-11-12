@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart'
@@ -9,6 +8,7 @@ import 'package:flutter/services.dart'
 import 'feature_language.dart';
 import 'reports.dart';
 import 'test_ads.dart';
+import 'tracker_ui.dart';
 import 'usage.dart';
 
 void main() => runApp(TrackerApp(ads: AdMobTestAds()));
@@ -190,7 +190,7 @@ class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.data_usage_rounded, size: 42),
+                    const TrackerLogo(size: 56),
                     const SizedBox(height: 12),
                     Text(language == 'ar' ? 'بنحمّل الاستهلاك' : 'Loading usage'),
                     const SizedBox(height: 18),
@@ -250,7 +250,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   String sort = 'usage';
 
   bool get mobile => network == Network.mobile;
-  String get networkName => mobile ? tr(context, 'Mobile data', 'داتا الموبايل') : 'Wi-Fi';
+  String get networkName => network == Network.both
+      ? tr(context, 'All networks', 'كل الشبكات') : network.label(context);
   DateTime get earliest => calendarDay(mondayOf(today), -364);
   DateTime get periodStart {
     final selected = details ? day : today;
@@ -289,6 +290,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       error = null;
     });
     try {
+      final openedNetwork = await usage.widgetNetwork();
+      if (!mounted || ticket != request) return;
+      if (openedNetwork != null) {
+        setState(() {
+          network = openedNetwork;
+          details = false;
+        });
+      }
       final allowed = await usage.hasAccess();
       if (!mounted || ticket != request) return;
       if (!allowed) {
@@ -349,13 +358,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     }
   }
 
-  void openDetails() {
+  void openDetails({bool yesterday = false}) {
     if (details || busy) return;
     setState(() {
-      day = today;
+      day = yesterday ? calendarDay(today, -1) : today;
       details = true;
       monthly = false;
     });
+    if (yesterday) load(reusePeriod: true);
   }
 
   void closeDetails() {
@@ -471,9 +481,39 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Future<void> addWidget() async {
+    final selected = await showModalBottomSheet<Network>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Text(tr(context, 'Choose a home screen widget', 'اختار ويدجت للشاشة الرئيسية'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              ),
+              for (final network in [Network.wifi, Network.mobile, Network.both])
+                ListTile(
+                  leading: Icon(network.icon),
+                  title: Text(network == Network.both
+                    ? tr(context, 'Wi-Fi + mobile data', 'الواي فاي + داتا الموبايل')
+                    : network.label(context)),
+                  trailing: const Icon(Icons.add_to_home_screen),
+                  onTap: () => Navigator.pop(sheetContext, network),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
     var requested = false;
     try {
-      requested = await usage.pinWidget();
+      requested = await usage.pinWidget(selected);
     } on PlatformException {
       // Some launchers only support adding widgets through their picker.
     }
@@ -588,14 +628,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             : null,
         title: details
             ? Text(networkName, style: const TextStyle(fontWeight: FontWeight.w800))
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Data Usage Tracker', style: TextStyle(fontWeight: FontWeight.w800)),
-                  if (hasAccess)
-                    Text('$networkName usage', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                ],
-              ),
+            : Row(children: [
+                const TrackerLogo(),
+                const SizedBox(width: 12),
+                Flexible(child: Text('Data Usage Tracker', maxLines: 2,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
+              ]),
         actions: [
           if (hasAccess || !details)
             IconButton(
@@ -682,7 +720,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Widget overview(BuildContext context) {
-    final data = dailyData![network];
+    final data = dailyData!.forNetwork(network);
     final bytes = data?.total;
     final weekTotal = periodTotal;
     final scheme = Theme.of(context).colorScheme;
@@ -700,24 +738,10 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              ChoiceChip(
-                avatar: const Icon(Icons.wifi, size: 18),
-                label: const Text('Wi-Fi'),
-                selected: !mobile,
-                onSelected: (_) { if (mobile) switchNetwork(); },
-              ),
-              ChoiceChip(
-                avatar: const Icon(Icons.signal_cellular_alt, size: 18),
-                label: Text(tr(context, 'Mobile data', 'داتا الموبايل')),
-                selected: mobile,
-                onSelected: (_) { if (!mobile) switchNetwork(); },
-              ),
-            ],
-          ),
+          Text(tr(context, 'Choose what to analyze', 'اختار عايز تحلّل إيه'),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          NetworkChoices(selected: network, onChanged: (value) => setState(() => network = value)),
           const SizedBox(height: 14),
           surface(context, child: Padding(
             padding: const EdgeInsets.all(20),
@@ -757,7 +781,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                       accent,
                       scheme.surfaceContainerHighest,
                     ),
-                    child: Icon(mobile ? Icons.signal_cellular_alt : Icons.wifi, color: accent, size: 32),
+                    child: Icon(network.icon, color: accent, size: 32),
                   ),
                 ),
               );
@@ -774,20 +798,28 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             subtitle: Text(usageLabel(bytes), style: Theme.of(context).textTheme.titleLarge
               ?.copyWith(fontWeight: FontWeight.w700)),
           )),
+          if (network == Network.both)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Wrap(spacing: 16, runSpacing: 4, children: [
+                for (final option in [Network.wifi, Network.mobile])
+                  Text('${option.label(context)} · ${usageLabel(dailyData![option]?.total)}'),
+              ]),
+            ),
           if (bytes == null) mobileAccessNotice(),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: openDetails,
             icon: const Icon(Icons.insights_outlined),
             label: Text(tr(context, 'View usage details', 'شوف تفاصيل الاستهلاك')),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           surface(context, child: ListTile(
             leading: const Icon(Icons.widgets_outlined),
             title: Text(tr(context, 'Home screen widget', 'ويدجت الشاشة الرئيسية')),
             subtitle: Text(widgetInstalled
               ? tr(context, 'Widget added to your home screen', 'الويدجت اتضاف للشاشة الرئيسية')
-              : tr(context, 'See your data usage without opening the app', 'شوف استهلاك الداتا من غير ما تفتح التطبيق')),
+              : tr(context, 'Wi-Fi, mobile data, or both on your home screen', 'الواي فاي أو داتا الموبايل أو الاتنين على الشاشة الرئيسية')),
             trailing: IconButton(
               tooltip: tr(context, 'Add widget', 'ضيف الويدجت'),
               onPressed: addWidget,
@@ -795,6 +827,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             ),
             onTap: addWidget,
           )),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: () => openDetails(yesterday: true),
+              icon: const Icon(Icons.history),
+              label: Text(tr(context, 'Analyze yesterday', 'حلّل استهلاك امبارح')),
+            ),
+          ),
           PlanSummary(settings: monitor, service: usage, today: today, revision: request, onEdit: editPlan),
           OutlinedButton.icon(
             onPressed: openReports,
@@ -846,7 +886,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   Widget detailsView(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = mobile ? scheme.secondary : scheme.primary;
-    final data = dailyData![network];
+    final data = dailyData!.forNetwork(network);
     final amounts = series;
     final total = periodTotal;
     final needle = query.trim().toLowerCase();
@@ -1158,86 +1198,6 @@ class _PeriodChartState extends State<PeriodChart> {
               child: Row(children: columns))
           : Row(children: columns);
     });
-  }
-}
-
-class AppRow extends StatefulWidget {
-  const AppRow({
-    super.key, required this.app, required this.color,
-    required this.total, required this.service,
-  });
-
-  final AppUsage app;
-  final Color color;
-  final int total;
-  final UsageService service;
-
-  @override
-  State<AppRow> createState() => _AppRowState();
-}
-
-class _AppRowState extends State<AppRow> {
-  late final Future<Uint8List?>? icon = switch (widget.app.package) {
-    final String name when !name.contains(',') => widget.service.icon(name),
-    _ => null,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final fallback = Icon(Icons.apps_rounded, color: scheme.onSurfaceVariant);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: ColoredBox(
-              color: scheme.surface,
-              child: SizedBox.square(
-                dimension: 38,
-                child: FutureBuilder<Uint8List?>(
-                  future: icon,
-                  builder: (_, snapshot) => snapshot.data == null
-                      ? fallback
-                      : Image.memory(snapshot.data!, errorBuilder: (_, _, _) => fallback),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: Text(displayAppName(context, widget.app.name), style: const TextStyle(
-                    fontWeight: FontWeight.w700))),
-                  const SizedBox(width: 8),
-                  Flexible(child: Text(formatBytes(widget.app.bytes),
-                    textAlign: TextAlign.end, style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600))),
-                ],
-              ),
-              if (widget.app.package case final String name)
-                Text(name, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-              Text('↓ ${formatBytes(widget.app.rx)}  ↑ ${formatBytes(widget.app.tx)}',
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-              const SizedBox(height: 7),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(9),
-                child: LinearProgressIndicator(
-                  value: widget.app.bytes / widget.total,
-                  minHeight: 4, color: widget.color, backgroundColor: scheme.surfaceContainerHighest,
-                ),
-              ),
-            ],
-          )),
-        ],
-      ),
-    );
   }
 }
 

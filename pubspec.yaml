@@ -1,7 +1,7 @@
 name: data_usage_tracker
 description: On-device Wi-Fi and mobile data usage dashboard for Android.
 publish_to: none
-version: 1.1.0+6
+version: 1.2.0+7
 environment:
   sdk: '>=3.13.0 <4.0.0'
 dependencies:
