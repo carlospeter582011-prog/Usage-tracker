@@ -24,7 +24,11 @@ jobs:
           channel: stable
           cache: true
       - name: Install Android 17 SDK
-        run: sdkmanager "platforms;android-37"
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$sdkmanager"
+          "$sdkmanager" "platforms;android-37"
       - name: Prepare Android project
         run: bash scripts/prepare-android.sh
       - run: flutter pub get
