@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -5,9 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show MissingPluginException, PlatformException, SystemUiOverlayStyle;
 
+import 'test_ads.dart';
 import 'usage.dart';
 
-void main() => runApp(const TrackerApp());
+void main() => runApp(TrackerApp(ads: AdMobTestAds()));
 
 extension AppearanceLabel on ThemeMode {
   String get label => switch (this) {
@@ -42,21 +44,76 @@ ThemeData trackerTheme(Brightness brightness) {
 }
 
 class TrackerApp extends StatefulWidget {
-  const TrackerApp({super.key});
+  const TrackerApp({super.key, this.ads});
+
+  final TrackerAds? ads;
 
   @override
   State<TrackerApp> createState() => _TrackerAppState();
 }
 
-class _TrackerAppState extends State<TrackerApp> {
+class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
   final usage = UsageService();
   ThemeMode mode = ThemeMode.system;
   int appearanceRevision = 0;
+  Timer? startupDeadline;
+  bool loadingScreen = false;
+  bool dashboardReady = false;
+  bool showingAd = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     restoreAppearance();
+    final ads = widget.ads;
+    if (ads != null) prepareLaunchAd(ads);
+  }
+
+  @override
+  void dispose() {
+    startupDeadline?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && !showingAd) closeLoadingScreen();
+  }
+
+  void closeLoadingScreen() {
+    startupDeadline?.cancel();
+    if (mounted && loadingScreen) setState(() => loadingScreen = false);
+  }
+
+  void finishDashboardStartup() {
+    dashboardReady = true;
+    if (!showingAd) closeLoadingScreen();
+  }
+
+  Future<void> prepareLaunchAd(TrackerAds ads) async {
+    LaunchAd? ad;
+    try {
+      if (!await usage.returningLaunch() || !mounted || dashboardReady) return;
+      setState(() => loadingScreen = true);
+      startupDeadline = Timer(const Duration(seconds: 2), closeLoadingScreen);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !loadingScreen) return;
+      ad = await ads.loadLaunchAd();
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (ad == null || !mounted || !loadingScreen || dashboardReady ||
+          (lifecycle != null && lifecycle != AppLifecycleState.resumed)) return;
+      startupDeadline?.cancel();
+      showingAd = true;
+      await ad.show();
+    } catch (_) {
+      // Ad failures should leave app startup available.
+    } finally {
+      ad?.dispose();
+      showingAd = false;
+      closeLoadingScreen();
+    }
   }
 
   Future<void> restoreAppearance() async {
@@ -89,15 +146,54 @@ class _TrackerAppState extends State<TrackerApp> {
     theme: trackerTheme(Brightness.light),
     darkTheme: trackerTheme(Brightness.dark),
     themeMode: mode,
-    home: Dashboard(mode: mode, onAppearanceChanged: changeAppearance),
+    home: Stack(
+      fit: StackFit.expand,
+      children: [
+        ExcludeSemantics(
+          excluding: loadingScreen,
+          child: Dashboard(
+            mode: mode,
+            onAppearanceChanged: changeAppearance,
+            onInitialLoadFinished: finishDashboardStartup,
+            ads: loadingScreen ? null : widget.ads,
+          ),
+        ),
+        if (loadingScreen)
+          const Scaffold(
+            key: ValueKey('launch-loading'),
+            body: SafeArea(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.data_usage_rounded, size: 42),
+                    SizedBox(height: 12),
+                    Text('Loading usage'),
+                    SizedBox(height: 18),
+                    CircularProgressIndicator(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
   );
 }
 
 class Dashboard extends StatefulWidget {
-  const Dashboard({super.key, required this.mode, required this.onAppearanceChanged});
+  const Dashboard({
+    super.key,
+    required this.mode,
+    required this.onAppearanceChanged,
+    required this.onInitialLoadFinished,
+    this.ads,
+  });
 
   final ThemeMode mode;
   final Future<void> Function(ThemeMode) onAppearanceChanged;
+  final VoidCallback onInitialLoadFinished;
+  final TrackerAds? ads;
 
   @override
   State<Dashboard> createState() => _DashboardState();
@@ -112,6 +208,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   bool monthly = false;
   bool hasAccess = false;
   bool busy = true;
+  bool initialLoadFinished = false;
   bool needsPhonePermission = false;
   String? error;
   int goal = 0;
@@ -208,6 +305,11 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         busy = false;
         error = 'Usage tracking is available on Android.';
       });
+    } finally {
+      if (mounted && ticket == request && !initialLoadFinished) {
+        initialLoadFinished = true;
+        widget.onInitialLoadFinished();
+      }
     }
   }
 
@@ -383,23 +485,35 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       ),
       body: SafeArea(
         top: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 940),
-            child: error != null
-                ? notice(Icons.error_outline, error!, 'Retry', load)
-                : !hasAccess && !busy
-                ? notice(
-                    Icons.lock_outline,
-                    'Enable Usage access for Data Usage Tracker to see network usage.',
-                    'Open Usage access settings',
-                    () => platformAction(usage.openSettings),
-                  )
-                : busy
-                ? const Center(child: CircularProgressIndicator())
-                : details ? detailsView(context) : overview(context),
-          ),
+        child: Column(
+          children: [
+            if (hasAccess && widget.ads != null)
+              LayoutBuilder(builder: (context, constraints) =>
+                constraints.maxWidth >= 320
+                    ? widget.ads!.banner()
+                    : const SizedBox.shrink(),
+              ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 940),
+                  child: error != null
+                      ? notice(Icons.error_outline, error!, 'Retry', load)
+                      : !hasAccess && !busy
+                      ? notice(
+                          Icons.lock_outline,
+                          'Enable Usage access for Data Usage Tracker to see network usage.',
+                          'Open Usage access settings',
+                          () => platformAction(usage.openSettings),
+                        )
+                      : busy
+                      ? const Center(child: CircularProgressIndicator())
+                      : details ? detailsView(context) : overview(context),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     ),
@@ -426,7 +540,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       children: [
         Text(
           needsPhonePermission
-              ? 'Android 6–9 needs Phone permission to read mobile data usage.'
+              ? 'Android 7–9 needs Phone permission to read mobile data usage.'
               : 'Android could not read mobile data for an active SIM.',
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           textAlign: TextAlign.center,

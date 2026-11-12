@@ -24,6 +24,10 @@ import java.util.concurrent.Executors
 
 @Suppress("DEPRECATION")
 class MainActivity : FlutterActivity() {
+    companion object {
+        private var launchClaimed = false
+    }
+
     private var phonePermissionResult: MethodChannel.Result? = null
     private val phonePermissionCode = 107
     private val worker = Executors.newSingleThreadExecutor()
@@ -71,6 +75,14 @@ class MainActivity : FlutterActivity() {
                         val name = call.argument<String>("package")
                         if (name.isNullOrBlank()) result.success(null)
                         else inBackground(result) { appIcon(name) }
+                    }
+                    "returningLaunch" -> {
+                        val preferences = getPreferences(MODE_PRIVATE)
+                        val returning = !launchClaimed &&
+                            preferences.getBoolean("launchedBefore", false)
+                        launchClaimed = true
+                        preferences.edit().putBoolean("launchedBefore", true).apply()
+                        result.success(returning && hasAccess())
                     }
                     "appearance" -> result.success(
                         getPreferences(MODE_PRIVATE).getString("appearance", "system")

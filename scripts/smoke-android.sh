@@ -7,7 +7,7 @@ for attempt in {1..12}; do
   adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   layout="$(adb shell cat /sdcard/window.xml 2>/dev/null || true)"
   if [[ "$layout" == *"Open Usage access settings"* ]]; then
-    echo 'Data Usage Tracker displayed its permission screen on Android 6.'
+    echo 'Data Usage Tracker displayed its permission screen on Android 7.'
     exit 0
   fi
   sleep 2

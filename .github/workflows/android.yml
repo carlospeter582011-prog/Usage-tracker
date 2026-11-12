@@ -20,16 +20,18 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.8'
+          flutter-version: '3.50.0'
           channel: stable
           cache: true
+      - name: Install Android 17 SDK
+        run: sdkmanager "platforms;android-37"
       - name: Prepare Android project
         run: bash scripts/prepare-android.sh
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release --build-number "$GITHUB_RUN_NUMBER"
-      - run: flutter build appbundle --release --build-number "$GITHUB_RUN_NUMBER"
+      - run: flutter build apk --release --dart-define=USE_NEXT_GEN_SDK=true --build-number "$GITHUB_RUN_NUMBER"
+      - run: flutter build appbundle --release --dart-define=USE_NEXT_GEN_SDK=true --build-number "$GITHUB_RUN_NUMBER"
       - name: Verify APK and AAB
         run: |
           mkdir -p dist
@@ -43,8 +45,10 @@ jobs:
           aapt="$(find "$sdk_root/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$aapt"
           badging="$("$aapt" dump badging dist/Data-Usage-Tracker.apk)"
-          grep -Fx "sdkVersion:'23'" <<< "$badging"
-          "$(dirname "$aapt")/apksigner" verify --min-sdk-version 23 dist/Data-Usage-Tracker.apk
+          grep -Fx "sdkVersion:'24'" <<< "$badging"
+          grep -Fx "targetSdkVersion:'37'" <<< "$badging"
+          "$(dirname "$aapt")/apksigner" verify --min-sdk-version 24 dist/Data-Usage-Tracker.apk
+          "$(dirname "$aapt")/zipalign" -c -P 16 4 dist/Data-Usage-Tracker.apk
           sha256sum dist/Data-Usage-Tracker.{apk,aab}
       - uses: actions/upload-artifact@v4
         with:
@@ -53,15 +57,15 @@ jobs:
             dist/Data-Usage-Tracker.apk
             dist/Data-Usage-Tracker.aab
           if-no-files-found: error
-      - name: Enable hardware acceleration for Android 6 emulator
+      - name: Enable hardware acceleration for Android 7 emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Install and launch on Android 6
+      - name: Install and launch on Android 7
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 23
+          api-level: 24
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
@@ -99,7 +103,7 @@ jobs:
           else
             gh release create "$tag" --draft --target "$GITHUB_SHA" \
               --title "Data Usage Tracker · Build $GITHUB_RUN_NUMBER" \
-              --notes "Android 6+ · APK and Android App Bundle · Commit $GITHUB_SHA"
+              --notes "Android 7+ · APK and Android App Bundle · Commit $GITHUB_SHA"
           fi
 
           gh release upload "$tag" "$apk" "$aab" --clobber

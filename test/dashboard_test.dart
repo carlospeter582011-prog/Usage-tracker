@@ -154,7 +154,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('keeps Wi-Fi available without Android 6–9 Phone permission', (tester) async {
+  testWidgets('keeps Wi-Fi available without Android 7–9 Phone permission', (tester) async {
     tester.view.physicalSize = const Size(390, 820);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
