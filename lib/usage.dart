@@ -46,12 +46,12 @@ class NetworkUsage {
 
 class UsageTotals {
   UsageTotals(Map<Object?, Object?> json)
-    : mobile = json['mobile'] as int,
+    : mobile = json['mobile'] as int?,
       wifi = json['wifi'] as int;
 
-  final int mobile;
+  final int? mobile;
   final int wifi;
-  int get combined => mobile + wifi;
+  int get combined => (mobile ?? 0) + wifi;
 }
 
 class UsageService {
@@ -60,9 +60,15 @@ class UsageService {
   Future<bool> hasAccess() async =>
       await _channel.invokeMethod<bool>('hasAccess') ?? false;
 
+  Future<bool> needsPhonePermission() async =>
+      await _channel.invokeMethod<bool>('needsPhonePermission') ?? false;
+
+  Future<void> requestPhonePermission() =>
+      _channel.invokeMethod<void>('requestPhonePermission');
+
   Future<void> openSettings() => _channel.invokeMethod<void>('openSettings');
 
-  Future<Map<Network, NetworkUsage>> daily(DateTime day) async {
+  Future<Map<Network, NetworkUsage?>> daily(DateTime day) async {
     final result = (await _channel.invokeMapMethod<Object?, Object?>('daily', {
       'bounds': [
         calendarDay(day).millisecondsSinceEpoch,
@@ -71,7 +77,9 @@ class UsageService {
     }))!;
     return {
       for (final network in Network.values)
-        network: NetworkUsage(result[network.name] as Map<Object?, Object?>),
+        network: result[network.name] == null
+            ? null
+            : NetworkUsage(result[network.name] as Map<Object?, Object?>),
     };
   }
 

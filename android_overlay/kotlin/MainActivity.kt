@@ -1,5 +1,6 @@
 package com.carlos.data_usage_tracker
 
+import android.Manifest
 import android.app.AppOpsManager
 import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
@@ -8,8 +9,12 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.ConnectivityManager
+import android.net.Uri
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import android.util.LruCache
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,6 +24,8 @@ import java.util.concurrent.Executors
 
 @Suppress("DEPRECATION")
 class MainActivity : FlutterActivity() {
+    private var phonePermissionResult: MethodChannel.Result? = null
+    private val phonePermissionCode = 107
     private val worker = Executors.newSingleThreadExecutor()
     private val icons = object : LruCache<String, ByteArray>(2 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ByteArray) = value.size
@@ -30,6 +37,8 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "hasAccess" -> result.success(hasAccess())
+                    "needsPhonePermission" -> result.success(needsPhonePermission())
+                    "requestPhonePermission" -> requestPhonePermission(result)
                     "openSettings" -> {
                         try {
                             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
@@ -95,45 +104,117 @@ class MainActivity : FlutterActivity() {
         ) == AppOpsManager.MODE_ALLOWED
     }
 
-    private fun daily(start: Long, end: Long): Map<String, Any> {
+    private fun needsPhonePermission(): Boolean =
+        Build.VERSION.SDK_INT < 29 &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY) &&
+            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED
+
+    private fun requestPhonePermission(result: MethodChannel.Result) {
+        if (!needsPhonePermission() || phonePermissionResult != null) {
+            result.success(null)
+            return
+        }
+        val permission = Manifest.permission.READ_PHONE_STATE
+        val prefs = getPreferences(MODE_PRIVATE)
+        if (prefs.getBoolean("askedForPhonePermission", false) &&
+            !shouldShowRequestPermissionRationale(permission)
+        ) {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", packageName, null)))
+                result.success(null)
+            } catch (error: Exception) {
+                result.error("settings", "Could not open app permission settings.", null)
+            }
+            return
+        }
+        prefs.edit().putBoolean("askedForPhonePermission", true).apply()
+        phonePermissionResult = result
+        requestPermissions(arrayOf(permission), phonePermissionCode)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == phonePermissionCode) {
+            phonePermissionResult?.success(null)
+            phonePermissionResult = null
+        }
+    }
+
+    // Android 10+ accepts null for all mobile networks. Older versions require
+    // the identifiers of the SIMs whose usage is being queried.
+    private fun mobileSubscribers(): List<String?>? {
+        if (Build.VERSION.SDK_INT >= 29) return listOf(null)
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) return emptyList()
+        if (needsPhonePermission()) return null
+        val phone = getSystemService(TelephonyManager::class.java) ?: return null
+        return try {
+            val ids = mutableSetOf<String>()
+            phone.subscriberId?.let(ids::add)
+            if (Build.VERSION.SDK_INT >= 24) {
+                val subscriptions = getSystemService(SubscriptionManager::class.java)
+                subscriptions?.activeSubscriptionInfoList.orEmpty().forEach { subscription ->
+                    phone.createForSubscriptionId(subscription.subscriptionId).subscriberId
+                        ?.let(ids::add)
+                }
+            }
+            ids.toList().takeIf { it.isNotEmpty() }
+        } catch (error: SecurityException) {
+            null
+        }
+    }
+
+    private fun daily(start: Long, end: Long): Map<String, Any?> {
         val manager = checkNotNull(getSystemService(NetworkStatsManager::class.java))
         val cutoff = minOf(end, System.currentTimeMillis())
         val packages = mutableMapOf<Int, Pair<String, String?>>()
+        val mobile = mobileSubscribers()?.let { subscribers ->
+            dayNetwork(manager, ConnectivityManager.TYPE_MOBILE, subscribers, start, cutoff, packages)
+        }
         return mapOf(
-            "mobile" to dayNetwork(manager, ConnectivityManager.TYPE_MOBILE, start, cutoff, packages),
-            "wifi" to dayNetwork(manager, ConnectivityManager.TYPE_WIFI, start, cutoff, packages)
+            "mobile" to mobile,
+            "wifi" to dayNetwork(manager, ConnectivityManager.TYPE_WIFI, listOf(null), start, cutoff, packages)
         )
     }
 
-    private fun weekly(bounds: List<Long>): List<Map<String, Long>?> {
+    private fun weekly(bounds: List<Long>): List<Map<String, Long?>?> {
         val manager = checkNotNull(getSystemService(NetworkStatsManager::class.java))
         val now = System.currentTimeMillis()
+        val subscribers = mobileSubscribers()
         return bounds.zipWithNext { start, end ->
+            val cutoff = minOf(end, now)
             if (start >= now) null
             else mapOf(
-                "mobile" to total(manager, ConnectivityManager.TYPE_MOBILE, start, minOf(end, now)),
-                "wifi" to total(manager, ConnectivityManager.TYPE_WIFI, start, minOf(end, now))
+                "mobile" to subscribers?.sumOf { total(manager, ConnectivityManager.TYPE_MOBILE, it, start, cutoff) },
+                "wifi" to total(manager, ConnectivityManager.TYPE_WIFI, null, start, cutoff)
             )
         }
     }
 
-    private fun total(manager: NetworkStatsManager, type: Int, start: Long, end: Long): Long {
+    private fun total(
+        manager: NetworkStatsManager, type: Int, subscriber: String?, start: Long, end: Long
+    ): Long {
         if (end <= start) return 0
-        val bucket = checkNotNull(manager.querySummaryForDevice(type, null, start, end))
+        val bucket = checkNotNull(manager.querySummaryForDevice(type, subscriber, start, end))
         return bucket.rxBytes + bucket.txBytes
     }
 
     private fun dayNetwork(
         manager: NetworkStatsManager,
         type: Int,
+        subscribers: List<String?>,
         start: Long,
         end: Long,
         packages: MutableMap<Int, Pair<String, String?>>
     ): Map<String, Any> {
-        val deviceTotal = total(manager, type, start, end)
+        val deviceTotal = subscribers.sumOf { total(manager, type, it, start, end) }
         val bytesByUid = mutableMapOf<Int, Long>()
-        if (end > start) {
-            checkNotNull(manager.querySummary(type, null, start, end)).use { stats ->
+        if (end > start) for (subscriber in subscribers) {
+            checkNotNull(manager.querySummary(type, subscriber, start, end)).use { stats ->
                 val bucket = NetworkStats.Bucket()
                 while (stats.hasNextBucket() && stats.getNextBucket(bucket)) {
                     val bytes = bucket.rxBytes + bucket.txBytes

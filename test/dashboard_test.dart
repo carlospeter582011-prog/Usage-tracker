@@ -77,4 +77,35 @@ void main() {
     expect(find.text('210 MB'), findsOneWidget);
     expect(find.text('Edit weekly mobile limit'), findsOneWidget);
   });
+  testWidgets('keeps Wi-Fi available when Android 6–9 Phone permission is off', (tester) async {
+    var requested = false;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'hasAccess':
+        case 'needsPhonePermission':
+          return true;
+        case 'daily':
+          return {
+            'mobile': null,
+            'wifi': {'total': 12000000, 'apps': []},
+          };
+        case 'requestPhonePermission':
+          requested = true;
+          return null;
+        default:
+          return null;
+      }
+    });
+    await tester.pumpWidget(const TrackerApp());
+    await tester.pumpAndSettle();
+    expect(find.text('Unavailable'), findsOneWidget);
+    await tester.tap(find.text('Allow mobile data access'));
+    await tester.pumpAndSettle();
+    expect(requested, isTrue);
+    await tester.tap(find.text('Wi-Fi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Wi-Fi usage by app'), findsOneWidget);
+    expect(find.text('12.0 MB'), findsOneWidget);
+  });
+
 }

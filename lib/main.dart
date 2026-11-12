@@ -54,10 +54,11 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   bool weekly = false;
   bool? hasAccess;
   bool busy = true;
+  bool needsPhonePermission = false;
   String? error;
   int goal = 0;
   int request = 0;
-  Map<Network, NetworkUsage>? dailyData;
+  Map<Network, NetworkUsage?>? dailyData;
   List<UsageTotals?>? weeklyData;
 
   DateTime get earliest => calendarDay(mondayOf(today), -364);
@@ -101,6 +102,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         });
         return;
       }
+      final phonePermission = await usage.needsPhonePermission();
+      if (!mounted || ticket != request) return;
       final showWeek = weekly;
       final weekData = showWeek ? await usage.weekly(week) : null;
       final dayData = showWeek ? null : await usage.daily(day);
@@ -108,6 +111,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       if (!mounted || ticket != request) return;
       setState(() {
         hasAccess = true;
+        needsPhonePermission = phonePermission;
         busy = false;
         dailyData = dayData;
         weeklyData = weekData;
@@ -161,6 +165,38 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       );
     }
   }
+
+  Future<void> requestPhonePermission() async {
+    try {
+      await usage.requestPhonePermission();
+      if (mounted) load();
+    } on PlatformException catch (exception) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(exception.message ?? 'Could not request Phone permission.')),
+      );
+    }
+  }
+
+  Widget mobileAccessNotice() => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          needsPhonePermission
+              ? 'Android 6–9 needs Phone permission to read mobile data usage.'
+              : 'Android could not read mobile data for an active SIM.',
+          style: const TextStyle(color: muted),
+        ),
+        if (needsPhonePermission)
+          TextButton(
+            onPressed: requestPhonePermission,
+            child: const Text('Allow mobile data access'),
+          ),
+      ],
+    ),
+  );
 
   Future<void> editGoal() async {
     final updated = await showDialog<int>(
@@ -251,12 +287,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
 
   Widget dailyView(BuildContext context) {
     final dates = MaterialLocalizations.of(context);
-    final data = dailyData![network]!;
+    final data = dailyData![network];
     final color = network == Network.mobile ? mint : sky;
     return ListView.builder(
       key: const PageStorageKey('daily'),
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
-      itemCount: data.apps.isEmpty ? 3 : data.apps.length + 2,
+      itemCount: data == null || data.apps.isEmpty ? 3 : data.apps.length + 2,
       itemBuilder: (context, index) {
         if (index == 0) {
           return Column(
@@ -289,7 +325,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final cards = Network.values.map((type) {
-                    return totalCard(type, dailyData![type]!.total);
+                    return totalCard(type, dailyData![type]?.total);
                   }).toList();
                   if (constraints.maxWidth < 310 ||
                       MediaQuery.textScalerOf(context).scale(16) > 23) {
@@ -320,6 +356,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             ),
           );
         }
+        if (data == null) return mobileAccessNotice();
         if (data.apps.isEmpty) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
@@ -341,7 +378,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     );
   }
 
-  Widget totalCard(Network type, int bytes) {
+  Widget totalCard(Network type, int? bytes) {
     final mobile = type == Network.mobile;
     final color = mobile ? mint : sky;
     return Semantics(
@@ -364,7 +401,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 const SizedBox(height: 8),
                 Text(mobile ? 'Mobile data' : 'Wi-Fi', style: const TextStyle(color: muted)),
                 Text(
-                  formatBytes(bytes),
+                  bytes == null ? 'Unavailable' : formatBytes(bytes),
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
                 ),
               ],
@@ -379,6 +416,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     final dates = MaterialLocalizations.of(context);
     final data = weeklyData!;
     final mobile = data.fold<int>(0, (sum, day) => sum + (day?.mobile ?? 0));
+    final mobileAvailable = data.any((day) => day?.mobile != null);
     final wifi = data.fold<int>(0, (sum, day) => sum + (day?.wifi ?? 0));
     final peak = data.fold<int>(1, (max, day) => math.max(max, day?.combined ?? 0));
     return ListView(
@@ -423,19 +461,24 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Weekly total', style: TextStyle(color: muted)),
+                Text(
+                  mobileAvailable ? 'Weekly total' : 'Weekly Wi-Fi total',
+                  style: const TextStyle(color: muted),
+                ),
                 Text(formatBytes(mobile + wifi), style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 16,
                   runSpacing: 4,
                   children: [
-                    Text('Mobile ${formatBytes(mobile)}', style: const TextStyle(color: mint)),
+                    if (mobileAvailable)
+                      Text('Mobile ${formatBytes(mobile)}', style: const TextStyle(color: mint)),
                     Text('Wi-Fi ${formatBytes(wifi)}', style: const TextStyle(color: sky)),
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (goal > 0) ...[
+                if (!mobileAvailable) mobileAccessNotice(),
+                if (mobileAvailable && goal > 0) ...[
                   Text('${formatBytes(mobile)} of ${formatBytes(goal)} mobile limit'),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
@@ -476,11 +519,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${formatBytes(totals.combined)} total'),
+                  Text('${formatBytes(totals.combined)} ${totals.mobile == null ? 'Wi-Fi total' : 'total'}'),
                   Wrap(
                     spacing: 12,
                     children: [
-                      Text('Mobile ${formatBytes(totals.mobile)}', style: const TextStyle(color: mint)),
+                      if (totals.mobile case final int mobile)
+                        Text('Mobile ${formatBytes(mobile)}', style: const TextStyle(color: mint)),
                       Text('Wi-Fi ${formatBytes(totals.wifi)}', style: const TextStyle(color: sky)),
                     ],
                   ),
@@ -493,7 +537,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: size.maxWidth * (totals.mobile / peak),
+                              width: size.maxWidth * ((totals.mobile ?? 0) / peak),
                               height: 8,
                               child: const ColoredBox(color: mint),
                             ),

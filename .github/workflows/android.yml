@@ -20,7 +20,7 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.41.9'
+          flutter-version: '3.32.8'
           channel: stable
           cache: true
       - name: Prepare Android project
@@ -34,9 +34,23 @@ jobs:
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/Data-Usage-Tracker.apk
           unzip -tq dist/Data-Usage-Tracker.apk
+          apkanalyzer manifest min-sdk dist/Data-Usage-Tracker.apk | grep -x 23
           sha256sum dist/Data-Usage-Tracker.apk
       - uses: actions/upload-artifact@v4
         with:
           name: Data-Usage-Tracker
           path: dist/Data-Usage-Tracker.apk
           if-no-files-found: error
+      - name: Enable hardware acceleration for Android 6 emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch on Android 6
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 23
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash scripts/smoke-android.sh dist/Data-Usage-Tracker.apk
