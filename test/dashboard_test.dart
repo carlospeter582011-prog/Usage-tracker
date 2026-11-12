@@ -48,7 +48,7 @@ void main() {
       }
     });
 
-    ThemeMode appMode() => tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode;
+    ThemeMode? appMode() => tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode;
 
     await tester.pumpWidget(const TrackerApp());
     await tester.pumpAndSettle();
