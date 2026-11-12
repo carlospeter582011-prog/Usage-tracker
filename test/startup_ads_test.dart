@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:data_usage_tracker/main.dart';
 import 'package:data_usage_tracker/test_ads.dart';
-import 'package:flutter/material.dart' show Key, Text, Widget;
+import 'package:flutter/widgets.dart' show Key, Text, Widget;
 import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 
