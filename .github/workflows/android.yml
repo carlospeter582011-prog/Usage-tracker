@@ -23,17 +23,17 @@ jobs:
           flutter-version: '3.50.0'
           channel: stable
           cache: true
-      - name: Install Android 17 SDK
-        run: |
-          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
-          test -x "$sdkmanager"
-          "$sdkmanager" "platforms;android-37"
       - name: Prepare Android project
         run: bash scripts/prepare-android.sh
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: Install Android 17 SDK
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$sdkmanager"
+          "$sdkmanager" "platforms;android-37.0"
       - run: flutter build apk --release --dart-define=USE_NEXT_GEN_SDK=true --build-number "$GITHUB_RUN_NUMBER"
       - run: flutter build appbundle --release --dart-define=USE_NEXT_GEN_SDK=true --build-number "$GITHUB_RUN_NUMBER"
       - name: Verify APK and AAB
