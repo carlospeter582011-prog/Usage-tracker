@@ -196,6 +196,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
   });
+  testWidgets('adds any of the three widgets from the dashboard', (tester) async {
+    final requests = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'hasAccess':
+          return true;
+        case 'daily':
+          return {
+            'mobile': {'total': 20, 'apps': []},
+            'wifi': {'total': 30, 'apps': []},
+          };
+        case 'pinWidget':
+          requests.add((call.arguments as Map)['network'] as String);
+          return true;
+        default:
+          return null;
+      }
+    });
+
+    await tester.pumpWidget(const TrackerApp());
+    await tester.pumpAndSettle();
+    for (final label in ['Wi-Fi', 'Mobile data', 'Wi-Fi + mobile data']) {
+      await tester.tap(find.text('Add widget'));
+      await tester.pumpAndSettle();
+      expect(find.text('Choose a home screen widget'), findsOneWidget);
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+    expect(requests, ['wifi', 'mobile', 'both']);
+  });
+
   for (final destination in ['wifi', 'mobile', 'both']) {
     testWidgets('opens the correct page for the $destination widget', (tester) async {
       String? pending = destination;

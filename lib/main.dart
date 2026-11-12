@@ -823,6 +823,15 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         }),
         const SizedBox(height: 20),
         surface(context, child: ListTile(
+          leading: Icon(Icons.add_to_home_screen, color: scheme.primary),
+          title: Text(tr(context, 'Add widget', 'ضيف ويدجت')),
+          subtitle: Text(tr(context, 'Choose a widget for your Android home screen',
+            'اختار ويدجت لشاشة الموبايل الرئيسية')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: addWidget,
+        )),
+        const SizedBox(height: 10),
+        surface(context, child: ListTile(
           leading: const Icon(Icons.analytics_outlined),
           title: Text(tr(context, 'Usage reports', 'تقارير الاستهلاك')),
           subtitle: Text(tr(context, 'Compare weeks, pick dates, or export CSV', 'قارن الأسابيع أو اختار تواريخ أو صدّر CSV')),

@@ -19,7 +19,7 @@ Usage includes download and upload. Android controls how often data refreshes an
 - Open an app row to see daily upload and download totals by network or pin the app to the dashboard. Search and sort by usage or name and filter system and user-installed apps.
 - Choose a custom date range, compare the current week to the same elapsed time last week, or save both networks to CSV through Android's file picker.
 - The dashboard shows today’s totals. Use its Wi-Fi and mobile data cards to open weekly, monthly, and per-app analysis. Open reports or the mobile plan from the dashboard.
-- In Settings → Home screen widget, choose the 2×1 Wi-Fi or mobile data widget to open its analysis, or the 3×2 combined widget to open the dashboard. Launchers without direct pinning can add widgets through their widget picker.
+- Tap Add widget on the dashboard or open Settings → Home screen widget. Choose the 2×1 Wi-Fi or mobile data widget to open its analysis, or the 3×2 combined widget to open the dashboard. Launchers without direct pinning can add widgets through their widget picker.
 - Choose Arabic or English from Settings.
 
 ## Test advertisements
