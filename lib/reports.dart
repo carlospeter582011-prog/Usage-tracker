@@ -191,7 +191,7 @@ class _AppHistoryPageState extends State<AppHistoryPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(displayAppName(context, widget.app.name)), actions: [
+    appBar: AppBar(title: Text(tr(context, 'App usage', 'استهلاك التطبيق')), actions: [
       IconButton(
         tooltip: pinned ? tr(context, 'Unpin', 'إلغاء التثبيت') : tr(context, 'Pin app', 'ثبّت التطبيق'),
         icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined),
@@ -213,15 +213,34 @@ class _AppHistoryPageState extends State<AppHistoryPage> {
     body: SafeArea(child: FutureBuilder<List<Object?>>(
       future: history,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final days = snapshot.data ?? const [];
+        final waiting = snapshot.connectionState != ConnectionState.done;
+        final days = waiting ? const <Object?>[] : snapshot.data ?? const [];
         final dates = MaterialLocalizations.of(context);
+        final theme = Theme.of(context);
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
-            if (widget.app.package != null) Text(widget.app.package!, textDirection: TextDirection.ltr),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(children: [
+                  AppIcon(packageName: widget.app.package, service: widget.service, size: 56),
+                  const SizedBox(width: 14),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(displayAppName(context, widget.app.name),
+                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                      if (widget.app.package case final String packageName)
+                        Text(packageName, textDirection: TextDirection.ltr,
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  )),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 8),
             Row(children: [
               IconButton(
                 tooltip: tr(context, 'Previous seven days', 'السبع أيام السابقة'),
@@ -230,6 +249,7 @@ class _AppHistoryPageState extends State<AppHistoryPage> {
               Expanded(child: Text(
                 '${dates.formatShortDate(calendarDay(end, -6))} – ${dates.formatShortDate(end)}',
                 textAlign: TextAlign.center,
+                style: theme.textTheme.labelLarge,
               )),
               IconButton(
                 tooltip: tr(context, 'Next seven days', 'السبع أيام التالية'),
@@ -237,17 +257,38 @@ class _AppHistoryPageState extends State<AppHistoryPage> {
                 icon: const Icon(Icons.chevron_right),
               ),
             ]),
-            if (days.isEmpty)
+            const SizedBox(height: 8),
+            if (waiting)
+              const LinearProgressIndicator()
+            else if (days.isEmpty)
               Text(tr(context, 'App history unavailable', 'سجل التطبيق غير متاح')),
             for (var index = days.length - 1; index >= 0; index--)
-              Card(child: ListTile(
-                title: Text(dates.formatFullDate(calendarDay(end, index - 6))),
-                subtitle: Text([
-                  trafficLabel( 'Wi-Fi', (days[index] as Map)['wifi']),
-                  trafficLabel( tr(context, 'Mobile data', 'داتا الموبايل'),
-                    (days[index] as Map)['mobile']),
-                ].join('\n')),
-              )),
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(dates.formatFullDate(calendarDay(end, index - 6)),
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      for (final network in [Network.wifi, Network.mobile])
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(children: [
+                            Icon(network.icon, size: 17, color: network == Network.wifi
+                              ? theme.colorScheme.primary : theme.colorScheme.secondary),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(network.label(context), style: theme.textTheme.bodySmall)),
+                            Flexible(child: Text(trafficLabel((days[index] as Map)[network.name]),
+                              textAlign: TextAlign.end, style: theme.textTheme.bodySmall)),
+                          ]),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -261,9 +302,9 @@ class _AppHistoryPageState extends State<AppHistoryPage> {
   });
 }
 
-String trafficLabel(String title, Object? value) {
-  if (value is! Map) return '$title · —';
-  return '$title · ↓ ${formatBytes(value['rx'] as int)}  ↑ ${formatBytes(value['tx'] as int)}';
+String trafficLabel(Object? value) {
+  if (value is! Map) return '—';
+  return '↓ ${formatBytes(value['rx'] as int)}  ↑ ${formatBytes(value['tx'] as int)}';
 }
 
 class RangeReportPage extends StatefulWidget {

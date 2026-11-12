@@ -152,7 +152,7 @@ internal object UsageMonitor {
             .filterValues { it.isNotEmpty() }
         val mobileNeeded = notify || installed.keys.any { it != WidgetNetwork.wifi }
         val today = if (allowed && mobileNeeded) runCatching { mobileTotal(context, day.timeInMillis, now) }.getOrNull() else null
-        val used = if (allowed && mobileNeeded && limit > 0) runCatching { mobileTotal(context, cycle, now) }.getOrNull() else null
+        val used = if (allowed && notify && settings.optBoolean("thresholds") && limit > 0) runCatching { mobileTotal(context, cycle, now) }.getOrNull() else null
         val wifi = if (allowed && installed.keys.any { it != WidgetNetwork.mobile }) runCatching {
             val stats = checkNotNull(context.getSystemService(NetworkStatsManager::class.java))
             val bucket = checkNotNull(stats.querySummaryForDevice(ConnectivityManager.TYPE_WIFI, null, day.timeInMillis, now))
@@ -161,33 +161,22 @@ internal object UsageMonitor {
 
         for ((network, ids) in installed) {
             val views = RemoteViews(context.packageName, network.layout)
-            val title = when (network) {
-                WidgetNetwork.mobile -> if (ar) "داتا الموبايل اليوم" else "Mobile data today"
-                WidgetNetwork.wifi -> if (ar) "الواي فاي اليوم" else "Wi-Fi today"
-                WidgetNetwork.both -> if (ar) "إجمالي الاستهلاك اليوم" else "Total usage today"
+            val wifiLabel = if (ar) "الواي فاي" else "Wi-Fi"
+            val mobileLabel = if (ar) "داتا الموبايل" else "Mobile data"
+            when (network) {
+                WidgetNetwork.both -> {
+                    views.setTextViewText(R.id.widget_wifi_usage, wifi?.let(::format) ?: "—")
+                    views.setTextViewText(R.id.widget_mobile_usage, today?.let(::format) ?: "—")
+                    views.setTextViewText(R.id.widget_wifi_title, wifiLabel)
+                    views.setTextViewText(R.id.widget_mobile_title, mobileLabel)
+                }
+                WidgetNetwork.mobile, WidgetNetwork.wifi -> {
+                    val isWifi = network == WidgetNetwork.wifi
+                    val bytes = if (isWifi) wifi else today
+                    views.setTextViewText(R.id.widget_today, bytes?.let(::format) ?: "—")
+                    views.setTextViewText(R.id.widget_title, if (isWifi) wifiLabel else mobileLabel)
+                }
             }
-            val bytes = when (network) {
-                WidgetNetwork.mobile -> today
-                WidgetNetwork.wifi -> wifi
-                WidgetNetwork.both -> if (today != null && wifi != null) today + wifi else null
-            }
-            views.setTextViewText(R.id.widget_title, title)
-            views.setTextViewText(R.id.widget_today, bytes?.let(::format) ?: "—")
-            if (network == WidgetNetwork.both) {
-                val wifiValue = wifi?.let(::format) ?: "—"
-                val mobileValue = today?.let(::format) ?: "—"
-                views.setTextViewText(R.id.widget_wifi_usage, if (ar) "واي فاي $wifiValue" else "Wi-Fi $wifiValue")
-                views.setTextViewText(R.id.widget_mobile_usage, if (ar) "داتا $mobileValue" else "Mobile data $mobileValue")
-            }
-            views.setTextViewText(R.id.widget_plan, when {
-                !allowed -> if (ar) "فعّل إذن الاستخدام" else "Enable Usage access"
-                network == WidgetNetwork.both ->
-                    if (ar) "اضغط لفتح الرئيسية" else "Tap to open dashboard"
-                network == WidgetNetwork.mobile && used != null ->
-                    if (ar) "متبقي ${format((limit - used).coerceAtLeast(0))}"
-                    else "${format((limit - used).coerceAtLeast(0))} left in plan"
-                else -> if (ar) "اضغط لفتح التطبيق" else "Tap to view usage"
-            })
             views.setOnClickPendingIntent(R.id.widget_container, appIntent(context, network))
             manager.updateAppWidget(ids, views)
         }

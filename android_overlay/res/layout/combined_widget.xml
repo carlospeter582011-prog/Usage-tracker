@@ -3,32 +3,35 @@
     android:id="@+id/widget_container"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center_vertical"
-    android:padding="12dp"
+    android:orientation="horizontal"
+    android:gravity="center"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
     android:background="@drawable/widget_background">
-
-    <TextView android:id="@+id/widget_title"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="@string/widget_both_title" android:textColor="#BCE9E1"
-        android:textSize="12sp" android:maxLines="1" android:ellipsize="end" />
-    <TextView android:id="@+id/widget_today"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="—" android:textColor="#FFFFFF" android:textStyle="bold"
-        android:textSize="22sp" android:maxLines="1" android:ellipsize="end" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:layout_marginTop="6dp">
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:orientation="vertical">
         <TextView android:id="@+id/widget_wifi_usage"
-            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:text="@string/widget_both_wifi" android:textColor="#BCE9E1"
-            android:textSize="12sp" android:maxLines="2" />
-        <TextView android:id="@+id/widget_mobile_usage"
-            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:text="@string/widget_both_mobile" android:textColor="#FFC584"
-            android:textSize="12sp" android:maxLines="2" />
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:includeFontPadding="false"
+            android:text="—" android:textColor="#FFFFFF" android:textStyle="bold"
+            android:textSize="15sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/widget_wifi_title"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:includeFontPadding="false"
+            android:text="@string/widget_wifi_label" android:textColor="#BCE9E1"
+            android:textSize="10sp" android:maxLines="1" android:ellipsize="end" />
     </LinearLayout>
-    <TextView android:id="@+id/widget_plan"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="4dp" android:text="@string/widget_both_hint" android:textColor="#BCE9E1"
-        android:textSize="11sp" android:maxLines="2" android:ellipsize="end" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:orientation="vertical">
+        <TextView android:id="@+id/widget_mobile_usage"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:includeFontPadding="false"
+            android:text="—" android:textColor="#FFFFFF" android:textStyle="bold"
+            android:textSize="15sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/widget_mobile_title"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center" android:includeFontPadding="false"
+            android:text="@string/widget_mobile_label" android:textColor="#FFC584"
+            android:textSize="10sp" android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
 </LinearLayout>

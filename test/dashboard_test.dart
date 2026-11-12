@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:data_usage_tracker/main.dart';
+import 'package:data_usage_tracker/reports.dart';
 import 'package:data_usage_tracker/usage.dart';
-import 'package:material_ui/material_ui.dart' show Brightness, MaterialApp, SizedBox, Theme, ThemeMode;
+import 'package:material_ui/material_ui.dart' show Brightness, Image, MaterialApp, SizedBox, Theme, ThemeMode;
 import 'package:flutter/services.dart' show MethodChannel, Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -196,6 +199,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('12.0 MB'), findsOneWidget);
   });
+  testWidgets('shows the selected app icon and identity in usage history', (tester) async {
+    final requested = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method != 'icon') return null;
+      requested.add((call.arguments as Map)['package'] as String);
+      return base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgWNUBAAHgATPetbznAAAAAElFTkSuQmCC');
+    });
+    await tester.pumpWidget(MaterialApp(home: AppHistoryPage(
+      app: AppUsage({'name': 'Google Play Store', 'package': 'com.android.vending', 'bytes': 0}),
+      day: DateTime(2026, 11, 12),
+      service: UsageService(),
+      pinned: false,
+      onPin: () async {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Google Play Store'), findsOneWidget);
+    expect(find.text('com.android.vending'), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    expect(requested, ['com.android.vending']);
+  });
+
   testWidgets('adds any of the three widgets from the dashboard', (tester) async {
     final requests = <String>[];
     messenger.setMockMethodCallHandler(channel, (call) async {

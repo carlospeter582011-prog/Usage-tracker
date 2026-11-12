@@ -1,13 +1,5 @@
 <resources>
     <string name="widget_mobile_label">داتا الموبايل</string>
-    <string name="widget_mobile_title">داتا الموبايل اليوم</string>
-    <string name="widget_mobile_hint">اضغط لعرض الاستهلاك</string>
     <string name="widget_wifi_label">الواي فاي</string>
-    <string name="widget_wifi_title">الواي فاي اليوم</string>
-    <string name="widget_wifi_hint">اضغط لعرض الاستهلاك</string>
     <string name="widget_both_label">واي فاي + داتا الموبايل</string>
-    <string name="widget_both_title">إجمالي الاستهلاك اليوم</string>
-    <string name="widget_both_hint">اضغط لفتح الرئيسية</string>
-    <string name="widget_both_wifi">واي فاي —</string>
-    <string name="widget_both_mobile">داتا الموبايل —</string>
 </resources>

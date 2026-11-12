@@ -517,7 +517,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                   title: Text(network == Network.both
                     ? tr(context, 'Wi-Fi + mobile data', 'الواي فاي + داتا الموبايل')
                     : network.label(context)),
-                  subtitle: Text(network == Network.both ? "3 × 2" : "2 × 1"),
+                  subtitle: Text(network == Network.both ? "3 × 1" : "2 × 1"),
                   trailing: const Icon(Icons.add_to_home_screen),
                   onTap: () => Navigator.pop(sheetContext, network),
                 ),

@@ -1,13 +1,5 @@
 <resources>
     <string name="widget_mobile_label">Mobile data</string>
-    <string name="widget_mobile_title">Mobile data today</string>
-    <string name="widget_mobile_hint">Tap to view usage</string>
     <string name="widget_wifi_label">Wi-Fi</string>
-    <string name="widget_wifi_title">Wi-Fi today</string>
-    <string name="widget_wifi_hint">Tap to view usage</string>
     <string name="widget_both_label">Wi-Fi + mobile data</string>
-    <string name="widget_both_title">Total usage today</string>
-    <string name="widget_both_hint">Tap to open dashboard</string>
-    <string name="widget_both_wifi">Wi-Fi —</string>
-    <string name="widget_both_mobile">Mobile data —</string>
 </resources>

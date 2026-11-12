@@ -1,6 +1,6 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="160dp"
-    android:minHeight="76dp"
+    android:minWidth="110dp"
+    android:minHeight="36dp"
     android:initialLayout="@layout/wifi_widget"
     android:previewLayout="@layout/wifi_widget"
     android:previewImage="@drawable/wifi_widget_preview"

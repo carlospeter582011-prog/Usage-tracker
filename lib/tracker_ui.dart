@@ -83,7 +83,55 @@ class _TrackerMark extends CustomPainter {
   bool shouldRepaint(_TrackerMark oldDelegate) => false;
 }
 
-class AppRow extends StatefulWidget {
+class AppIcon extends StatefulWidget {
+  const AppIcon({super.key, required this.packageName, required this.service, this.size = 38});
+
+  final String? packageName;
+  final UsageService service;
+  final double size;
+
+  @override
+  State<AppIcon> createState() => _AppIconState();
+}
+
+class _AppIconState extends State<AppIcon> {
+  late Future<Uint8List?>? icon = loadIcon();
+
+  Future<Uint8List?>? loadIcon() => switch (widget.packageName) {
+    final String name when !name.contains(',') => widget.service.icon(name),
+    _ => null,
+  };
+
+  @override
+  void didUpdateWidget(AppIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.packageName != widget.packageName) icon = loadIcon();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fallback = Icon(Icons.apps_rounded, color: scheme.onSurfaceVariant, size: widget.size * .56);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(widget.size * .22),
+      child: ColoredBox(
+        color: scheme.surfaceContainerHighest,
+        child: SizedBox.square(
+          dimension: widget.size,
+          child: FutureBuilder<Uint8List?>(
+            future: icon,
+            builder: (_, snapshot) => snapshot.data == null
+                ? fallback
+                : Image.memory(snapshot.data!, fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => fallback),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AppRow extends StatelessWidget {
   const AppRow({
     super.key, required this.app, required this.color,
     required this.total, required this.service,
@@ -95,39 +143,14 @@ class AppRow extends StatefulWidget {
   final UsageService service;
 
   @override
-  State<AppRow> createState() => _AppRowState();
-}
-
-class _AppRowState extends State<AppRow> {
-  late final Future<Uint8List?>? icon = switch (widget.app.package) {
-    final String name when !name.contains(',') => widget.service.icon(name),
-    _ => null,
-  };
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fallback = Icon(Icons.apps_rounded, color: scheme.onSurfaceVariant);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: ColoredBox(
-              color: scheme.surface,
-              child: SizedBox.square(
-                dimension: 38,
-                child: FutureBuilder<Uint8List?>(
-                  future: icon,
-                  builder: (_, snapshot) => snapshot.data == null
-                      ? fallback
-                      : Image.memory(snapshot.data!, errorBuilder: (_, _, _) => fallback),
-                ),
-              ),
-            ),
-          ),
+          AppIcon(packageName: app.package, service: service),
           const SizedBox(width: 12),
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -135,24 +158,24 @@ class _AppRowState extends State<AppRow> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: Text(displayAppName(context, widget.app.name), style: const TextStyle(
+                  Expanded(child: Text(displayAppName(context, app.name), style: const TextStyle(
                     fontWeight: FontWeight.w700))),
                   const SizedBox(width: 8),
-                  Flexible(child: Text(formatBytes(widget.app.bytes),
+                  Flexible(child: Text(formatBytes(app.bytes),
                     textAlign: TextAlign.end, style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600))),
                 ],
               ),
-              if (widget.app.package case final String name)
+              if (app.package case final String name)
                 Text(name, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-              Text('↓ ${formatBytes(widget.app.rx)}  ↑ ${formatBytes(widget.app.tx)}',
+              Text('↓ ${formatBytes(app.rx)}  ↑ ${formatBytes(app.tx)}',
                 style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 7),
               ClipRRect(
                 borderRadius: BorderRadius.circular(9),
                 child: LinearProgressIndicator(
-                  value: (widget.app.bytes / (widget.total > 0 ? widget.total : 1)).clamp(0.0, 1.0).toDouble(),
-                  minHeight: 4, color: widget.color, backgroundColor: scheme.surfaceContainerHighest,
+                  value: (app.bytes / (total > 0 ? total : 1)).clamp(0.0, 1.0).toDouble(),
+                  minHeight: 4, color: color, backgroundColor: scheme.surfaceContainerHighest,
                 ),
               ),
             ],
