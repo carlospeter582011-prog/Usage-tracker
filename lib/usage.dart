@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show MethodChannel;
@@ -25,11 +26,21 @@ class AppUsage {
   AppUsage(Map<Object?, Object?> json)
     : name = json['name'] as String,
       package = json['package'] as String?,
-      bytes = json['bytes'] as int;
+      bytes = json['bytes'] as int,
+      uid = json['uid'] as int?,
+      system = json['system'] as bool?,
+      rx = json['rx'] as int? ?? 0,
+      tx = json['tx'] as int? ?? 0;
 
   final String name;
   final String? package;
   final int bytes;
+  final int? uid;
+  final bool? system;
+  final int rx;
+  final int tx;
+
+  String get identity => package ?? 'uid:$uid';
 }
 
 class NetworkUsage {
@@ -68,11 +79,14 @@ class UsageService {
 
   Future<void> openSettings() => _channel.invokeMethod<void>('openSettings');
 
-  Future<Map<Network, NetworkUsage?>> daily(DateTime day) async {
+  Future<Map<Network, NetworkUsage?>> daily(DateTime day) =>
+      range(calendarDay(day), calendarDay(day, 1));
+
+  Future<Map<Network, NetworkUsage?>> range(DateTime start, DateTime end) async {
     final result = (await _channel.invokeMapMethod<Object?, Object?>('daily', {
       'bounds': [
-        calendarDay(day).millisecondsSinceEpoch,
-        calendarDay(day, 1).millisecondsSinceEpoch,
+        start.millisecondsSinceEpoch,
+        end.millisecondsSinceEpoch,
       ],
     }))!;
     return {
@@ -101,6 +115,44 @@ class UsageService {
         .toList(growable: false);
   }
 
+  Future<int?> mobileTotal(DateTime start, DateTime end) =>
+      _channel.invokeMethod<int>('mobileTotal', {
+        'bounds': [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch],
+      });
+
+  Future<List<Object?>> appHistory(int uid, DateTime start, int days) async =>
+      await _channel.invokeListMethod<Object?>('appHistory', {
+        'uid': uid,
+        'bounds': List.generate(days + 1,
+            (index) => calendarDay(start, index).millisecondsSinceEpoch),
+      }) ?? const [];
+
+  Future<MonitorSettings> settings() async {
+    final value = await _channel.invokeMethod<String>('monitorSettings');
+    return value == null ? const MonitorSettings() :
+        MonitorSettings.fromJson(jsonDecode(value) as Map<String, dynamic>);
+  }
+
+  Future<void> saveSettings(MonitorSettings settings) =>
+      _channel.invokeMethod<void>('saveMonitorSettings', {'value': jsonEncode(settings.toJson())});
+
+  Future<String?> language() => _channel.invokeMethod<String>('language');
+
+  Future<void> saveLanguage(String value) =>
+      _channel.invokeMethod<void>('saveLanguage', {'value': value});
+
+  Future<bool> pinWidget() async =>
+      await _channel.invokeMethod<bool>('pinWidget') ?? false;
+
+  Future<bool> widgetInstalled() async =>
+      await _channel.invokeMethod<bool>('widgetInstalled') ?? false;
+
+  Future<bool> notificationPermission() async =>
+      await _channel.invokeMethod<bool>('notificationPermission') ?? false;
+
+  Future<bool> exportCsv(String csv) async =>
+      await _channel.invokeMethod<bool>('exportCsv', {'csv': csv}) ?? false;
+
   Future<Uint8List?> icon(String package) =>
       _channel.invokeMethod<Uint8List>('icon', {'package': package});
 
@@ -116,4 +168,76 @@ class UsageService {
 
   Future<void> saveGoal(int bytes) =>
       _channel.invokeMethod<void>('saveGoal', {'bytes': bytes});
+}
+
+class MonitorSettings {
+  const MonitorSettings({
+    this.limit = 0, this.renewal = 1, this.thresholds = false,
+    this.spikes = false, this.pinned = const {},
+  });
+
+  MonitorSettings.fromJson(Map<String, dynamic> json)
+    : limit = json['limit'] as int? ?? 0,
+      renewal = json['renewal'] as int? ?? 1,
+      thresholds = json['thresholds'] as bool? ?? false,
+      spikes = json['spikes'] as bool? ?? false,
+      pinned = ((json['pinned'] as List?) ?? const []).cast<String>().toSet();
+
+  final int limit;
+  final int renewal;
+  final bool thresholds;
+  final bool spikes;
+  final Set<String> pinned;
+
+  MonitorSettings withPins(Set<String> pins) => MonitorSettings(
+    limit: limit, renewal: renewal, thresholds: thresholds, spikes: spikes, pinned: pins,
+  );
+
+  Map<String, Object> toJson() => {
+    'limit': limit, 'renewal': renewal, 'thresholds': thresholds,
+    'spikes': spikes, 'pinned': pinned.toList(),
+  };
+}
+
+(DateTime, DateTime) billingCycle(DateTime date, int renewal) {
+  DateTime inMonth(int month) {
+    final days = DateTime(date.year, month + 1, 0).day;
+    return DateTime(date.year, month, renewal.clamp(1, days));
+  }
+
+  final day = calendarDay(date);
+  final current = inMonth(day.month);
+  return day.isBefore(current)
+      ? (inMonth(day.month - 1), current)
+      : (current, inMonth(day.month + 1));
+}
+
+String csvField(Object value) {
+  var cell = value.toString();
+  if (value is String && RegExp(r'^\s*[=+@-]').hasMatch(cell)) {
+    cell = "'$cell";
+  }
+  return '"${cell.replaceAll('"', '""')}"';
+}
+
+String usageCsv(
+  Map<Network, NetworkUsage?> data,
+  String start,
+  String end,
+) {
+  final rows = <List<Object>>[
+    ['start_date', 'end_date', 'network', 'app', 'package', 'download_bytes',
+      'upload_bytes', 'total_bytes'],
+    for (final network in Network.values)
+      if (data[network] case final NetworkUsage values) ...[
+        [start, end, network.name, 'Device total', '', '', '', values.total],
+        for (final app in values.apps)
+          [start, end, network.name, app.name, app.package ?? '', app.rx, app.tx, app.bytes],
+      ],
+  ];
+  final csv = StringBuffer();
+  for (final row in rows) {
+    csv.writeln(row.map(csvField).join(','));
+  }
+  return csv.toString();
 }

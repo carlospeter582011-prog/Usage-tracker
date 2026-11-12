@@ -18,6 +18,5 @@ GRADLE
 mkdir -p android
 cp -R "$scaffold/data_usage_tracker/android/." android/
 cp android_overlay/AndroidManifest.xml android/app/src/main/
-cp android_overlay/kotlin/MainActivity.kt android/app/src/main/kotlin/com/carlos/data_usage_tracker/
-mkdir -p android/app/src/main/res/drawable
-cp android_overlay/res/drawable/tracker_icon.xml android/app/src/main/res/drawable/
+cp android_overlay/kotlin/*.kt android/app/src/main/kotlin/com/carlos/data_usage_tracker/
+cp -R android_overlay/res/. android/app/src/main/res/

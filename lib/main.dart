@@ -6,16 +6,18 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart'
     show MissingPluginException, PlatformException, SystemUiOverlayStyle;
 
+import 'feature_language.dart';
+import 'reports.dart';
 import 'test_ads.dart';
 import 'usage.dart';
 
 void main() => runApp(TrackerApp(ads: AdMobTestAds()));
 
 extension AppearanceLabel on ThemeMode {
-  String get label => switch (this) {
-    ThemeMode.system => 'Automatic',
-    ThemeMode.light => 'Light',
-    ThemeMode.dark => 'Dark',
+  String displayLabel(BuildContext context) => switch (this) {
+    ThemeMode.system => tr(context, 'Automatic', 'تلقائي'),
+    ThemeMode.light => tr(context, 'Light', 'فاتح'),
+    ThemeMode.dark => tr(context, 'Dark', 'داكن'),
   };
 }
 
@@ -55,6 +57,7 @@ class TrackerApp extends StatefulWidget {
 class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
   final usage = UsageService();
   ThemeMode mode = ThemeMode.system;
+  String language = 'en';
   int appearanceRevision = 0;
   Timer? startupDeadline;
   bool loadingScreen = false;
@@ -66,6 +69,7 @@ class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     restoreAppearance();
+    restoreLanguage();
     final ads = widget.ads;
     if (ads != null) prepareLaunchAd(ads);
   }
@@ -139,6 +143,22 @@ class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
     if (mounted && revision == appearanceRevision) setState(() => mode = next);
   }
 
+  Future<void> restoreLanguage() async {
+    try {
+      final saved = await usage.language();
+      if (mounted && saved == 'ar') setState(() => language = 'ar');
+    } on PlatformException {
+      // English is the default if preferences are unavailable.
+    } on MissingPluginException {
+      // The dashboard reports unsupported platforms separately.
+    }
+  }
+
+  Future<void> changeLanguage(String next) async {
+    await usage.saveLanguage(next);
+    if (mounted) setState(() => language = next);
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -146,6 +166,9 @@ class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
     theme: trackerTheme(Brightness.light),
     darkTheme: trackerTheme(Brightness.dark),
     themeMode: mode,
+    locale: Locale(language),
+    supportedLocales: const [Locale('en'), Locale('ar')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
     home: Stack(
       fit: StackFit.expand,
       children: [
@@ -154,23 +177,24 @@ class _TrackerAppState extends State<TrackerApp> with WidgetsBindingObserver {
           child: Dashboard(
             mode: mode,
             onAppearanceChanged: changeAppearance,
+            onLanguageChanged: changeLanguage,
             onInitialLoadFinished: finishDashboardStartup,
             ads: loadingScreen ? null : widget.ads,
           ),
         ),
         if (loadingScreen)
-          const Scaffold(
-            key: ValueKey('launch-loading'),
+          Scaffold(
+            key: const ValueKey('launch-loading'),
             body: SafeArea(
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.data_usage_rounded, size: 42),
-                    SizedBox(height: 12),
-                    Text('Loading usage'),
-                    SizedBox(height: 18),
-                    CircularProgressIndicator(),
+                    const Icon(Icons.data_usage_rounded, size: 42),
+                    const SizedBox(height: 12),
+                    Text(language == 'ar' ? 'بنحمّل الاستهلاك' : 'Loading usage'),
+                    const SizedBox(height: 18),
+                    const CircularProgressIndicator(),
                   ],
                 ),
               ),
@@ -186,12 +210,14 @@ class Dashboard extends StatefulWidget {
     super.key,
     required this.mode,
     required this.onAppearanceChanged,
+    required this.onLanguageChanged,
     required this.onInitialLoadFinished,
     this.ads,
   });
 
   final ThemeMode mode;
   final Future<void> Function(ThemeMode) onAppearanceChanged;
+  final Future<void> Function(String) onLanguageChanged;
   final VoidCallback onInitialLoadFinished;
   final TrackerAds? ads;
 
@@ -217,8 +243,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   List<UsageTotals?>? periodData;
   DateTime? loadedPeriod;
 
+  MonitorSettings monitor = const MonitorSettings();
+  bool widgetInstalled = false;
+  String filter = 'all';
+  String query = '';
+  String sort = 'usage';
+
   bool get mobile => network == Network.mobile;
-  String get networkName => mobile ? 'Mobile data' : 'Wi-Fi';
+  String get networkName => mobile ? tr(context, 'Mobile data', 'داتا الموبايل') : 'Wi-Fi';
   DateTime get earliest => calendarDay(mondayOf(today), -364);
   DateTime get periodStart {
     final selected = details ? day : today;
@@ -279,6 +311,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       final period = cached ??
           (month ? await usage.monthly(start) : await usage.weekly(start));
       final savedGoal = await usage.goal();
+      final savedMonitor = await usage.settings();
+      final hasWidget = await usage.widgetInstalled();
       if (!mounted || ticket != request) return;
       setState(() {
         hasAccess = true;
@@ -288,6 +322,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         periodData = period;
         loadedPeriod = start;
         goal = savedGoal;
+        monitor = savedMonitor;
+        widgetInstalled = hasWidget;
       });
     } on PlatformException catch (exception) {
       if (!mounted || ticket != request) return;
@@ -373,7 +409,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     final next = await showDialog<ThemeMode>(
       context: context,
       builder: (dialogContext) => SimpleDialog(
-        title: const Text('Appearance'),
+        title: Text(tr(context, 'Appearance', 'المظهر')),
         children: [
           for (final mode in ThemeMode.values)
             SimpleDialogOption(
@@ -386,7 +422,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                     ThemeMode.dark => Icons.dark_mode_outlined,
                   }),
                   const SizedBox(width: 14),
-                  Expanded(child: Text(mode.label)),
+                  Expanded(child: Text(mode.displayLabel(context))),
                   if (widget.mode == mode) const Icon(Icons.check, semanticLabel: 'Selected'),
                 ],
               ),
@@ -399,26 +435,112 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> chooseLanguage() async {
+    final next = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(tr(context, 'Language', 'اللغة')),
+        children: [
+          SimpleDialogOption(onPressed: () => Navigator.pop(context, 'en'), child: const Text('English')),
+          SimpleDialogOption(onPressed: () => Navigator.pop(context, 'ar'), child: const Text('العربية')),
+        ],
+      ),
+    );
+    if (next != null && mounted) await platformAction(() => widget.onLanguageChanged(next));
+  }
+
+  Future<void> editPlan() async {
+    var next = await showDialog<MonitorSettings>(
+      context: context, builder: (_) => PlanEditor(settings: monitor),
+    );
+    if (next == null || !mounted) return;
+    if ((next.thresholds || next.spikes) && !await usage.notificationPermission()) {
+      next = MonitorSettings(limit: next.limit, renewal: next.renewal, pinned: next.pinned);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr(context, 'Notification permission is off.', 'إذن الإشعارات مقفول.')),
+      ));
+    }
+    if (!mounted) return;
+    final updated = next;
+    await platformAction(() => saveMonitor(updated));
+  }
+
+  Future<void> saveMonitor(MonitorSettings settings) async {
+    await usage.saveSettings(settings);
+    if (mounted) setState(() => monitor = settings);
+  }
+
+  Future<void> addWidget() async {
+    var requested = false;
+    try {
+      requested = await usage.pinWidget();
+    } on PlatformException {
+      // Some launchers only support adding widgets through their picker.
+    }
+    if (requested || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr(context, 'Add the home screen widget', 'ضيف الويدجت للشاشة الرئيسية')),
+        content: Text(tr(context,
+          'Touch and hold an empty spot on your home screen, choose Widgets, then drag Data Usage Tracker onto the screen.',
+          'اضغط مطوّل على مكان فاضي في الشاشة الرئيسية، اختار الأدوات (Widgets)، واسحب Data Usage Tracker للشاشة.')),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr(context, 'Done', 'تمام')))],
+      ),
+    );
+  }
+
+  void openReports() => Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (_) => RangeReportPage(service: usage, network: network, today: today),
+  ));
+
+  void openApp(AppUsage app, DateTime date) => Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (_) => AppHistoryPage(
+      app: app, day: date, service: usage, pinned: monitor.pinned.contains(app.identity),
+      onPin: () {
+        final pins = {...monitor.pinned};
+        if (!pins.remove(app.identity)) pins.add(app.identity);
+        return saveMonitor(monitor.withPins(pins));
+      },
+    ),
+  ));
+
   void showSettings() {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
+        child: SingleChildScrollView(child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.palette_outlined),
-              title: const Text('Appearance'),
-              subtitle: Text(widget.mode.label),
+              title: Text(tr(context, 'Appearance', 'المظهر')),
+              subtitle: Text(widget.mode.displayLabel(context)),
               onTap: () {
                 Navigator.pop(sheetContext);
                 chooseAppearance();
               },
             ),
             ListTile(
+              leading: const Icon(Icons.translate),
+              title: Text(tr(context, 'Language', 'اللغة')),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                chooseLanguage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.widgets_outlined),
+              title: Text(tr(context, 'Home screen widget', 'ويدجت الشاشة الرئيسية')),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                addWidget();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.flag_outlined),
-              title: const Text('Weekly mobile limit'),
+              title: Text(tr(context, 'Weekly mobile limit', 'الحد الأسبوعي للداتا')),
               onTap: () {
                 Navigator.pop(sheetContext);
                 editGoal();
@@ -426,7 +548,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             ),
             ListTile(
               leading: const Icon(Icons.refresh),
-              title: const Text('Refresh usage'),
+              title: Text(tr(context, 'Refresh usage', 'حدّث الاستهلاك')),
               onTap: () {
                 Navigator.pop(sheetContext);
                 load();
@@ -434,14 +556,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             ),
             ListTile(
               leading: const Icon(Icons.admin_panel_settings_outlined),
-              title: const Text('Usage access settings'),
+              title: Text(tr(context, 'Usage access settings', 'إعدادات إذن الاستخدام')),
               onTap: () {
                 Navigator.pop(sheetContext);
                 platformAction(usage.openSettings);
               },
             ),
           ],
-        ),
+        )),
       ),
     );
   }
@@ -461,7 +583,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         toolbarHeight: details ? 56 : 72,
         centerTitle: details,
         leading: details
-            ? IconButton(tooltip: 'Back to overview', onPressed: closeDetails,
+            ? IconButton(tooltip: tr(context, 'Back to overview', 'ارجع للملخص'), onPressed: closeDetails,
                 icon: const Icon(Icons.arrow_back))
             : null,
         title: details
@@ -477,7 +599,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         actions: [
           if (hasAccess || !details)
             IconButton(
-              tooltip: details ? 'Switch network' : 'Settings',
+              tooltip: details ? tr(context, 'Switch network', 'بدّل الشبكة') : tr(context, 'Settings', 'الإعدادات'),
               onPressed: details ? switchNetwork : showSettings,
               icon: Icon(details ? (mobile ? Icons.wifi : Icons.signal_cellular_alt) : Icons.settings),
             ),
@@ -499,12 +621,12 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 940),
                   child: error != null
-                      ? notice(Icons.error_outline, error!, 'Retry', load)
+                      ? notice(Icons.error_outline, error!, tr(context, 'Retry', 'جرّب تاني'), load)
                       : !hasAccess && !busy
                       ? notice(
                           Icons.lock_outline,
-                          'Enable Usage access for Data Usage Tracker to see network usage.',
-                          'Open Usage access settings',
+                          tr(context, 'Enable Usage access for Data Usage Tracker to see network usage.', 'فعّل إذن الوصول للاستخدام لتطبيق Data Usage Tracker عشان تشوف استهلاك الشبكة.'),
+                          tr(context, 'Open Usage access settings', 'افتح إعدادات إذن الاستخدام'),
                           () => platformAction(usage.openSettings),
                         )
                       : busy
@@ -540,13 +662,15 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       children: [
         Text(
           needsPhonePermission
-              ? 'Android 7–9 needs Phone permission to read mobile data usage.'
-              : 'Android could not read mobile data for an active SIM.',
+              ? tr(context, 'Android 7–9 needs Phone permission to read mobile data usage.',
+                  'أندرويد ٧–٩ محتاج إذن الهاتف لقراءة استهلاك الداتا.')
+              : tr(context, 'Android could not read mobile data for an active SIM.',
+                  'أندرويد مقدرش يقرأ استهلاك الداتا لشريحة مفعّلة.'),
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           textAlign: TextAlign.center,
         ),
         if (needsPhonePermission)
-          TextButton(onPressed: requestPhonePermission, child: const Text('Allow mobile data access')),
+          TextButton(onPressed: requestPhonePermission, child: Text(tr(context, 'Allow mobile data access', 'اسمح بقراءة استهلاك الداتا'))),
       ],
     ),
   );
@@ -558,7 +682,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Widget overview(BuildContext context) {
-    final bytes = dailyData![network]?.total;
+    final data = dailyData![network];
+    final bytes = data?.total;
     final weekTotal = periodTotal;
     final scheme = Theme.of(context).colorScheme;
     final accent = mobile ? scheme.secondary : scheme.primary;
@@ -587,7 +712,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
               ),
               ChoiceChip(
                 avatar: const Icon(Icons.signal_cellular_alt, size: 18),
-                label: const Text('Mobile data'),
+                label: Text(tr(context, 'Mobile data', 'داتا الموبايل')),
                 selected: mobile,
                 onSelected: (_) { if (!mobile) switchNetwork(); },
               ),
@@ -603,22 +728,26 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Used this week', style: TextStyle(color: scheme.onSurfaceVariant)),
+                  Text(tr(context, 'Used this week', 'استهلاك الأسبوع'), style: TextStyle(color: scheme.onSurfaceVariant)),
                   const SizedBox(height: 4),
                   Text(usageLabel(weekTotal), style: Theme.of(context).textTheme.headlineMedium
                     ?.copyWith(fontWeight: FontWeight.w800)),
                   if (mobile && goal > 0 && weekTotal != null)
                     Text(
                       weekTotal > goal
-                          ? '${formatBytes(weekTotal - goal)} over weekly limit'
-                          : '${formatBytes(goal - weekTotal)} left this week',
+                          ? tr(context, '${formatBytes(weekTotal - goal)} over weekly limit',
+                          '${formatBytes(weekTotal - goal)} زيادة عن الحد الأسبوعي')
+                          : tr(context, '${formatBytes(goal - weekTotal)} left this week',
+                              'المتبقي الأسبوع ده ${formatBytes(goal - weekTotal)}'),
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                 ],
               );
               final hasLimit = mobile && goal > 0;
               final ring = Tooltip(
-                message: hasLimit ? 'Weekly mobile limit used' : "Today's share of this week's usage",
+                message: hasLimit
+                  ? tr(context, 'Weekly mobile limit used', 'المستهلك من الحد الأسبوعي')
+                  : tr(context, "Today's share of this week's usage", 'نسبة النهارده من استهلاك الأسبوع'),
                 child: SizedBox.square(
                   dimension: compact ? 86 : 104,
                   child: CustomPaint(
@@ -641,7 +770,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
           const SizedBox(height: 10),
           surface(context, child: ListTile(
             leading: Icon(Icons.today_outlined, color: accent),
-            title: const Text('Used today'),
+            title: Text(tr(context, 'Used today', 'استهلاك النهارده')),
             subtitle: Text(usageLabel(bytes), style: Theme.of(context).textTheme.titleLarge
               ?.copyWith(fontWeight: FontWeight.w700)),
           )),
@@ -650,10 +779,67 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
           FilledButton.icon(
             onPressed: openDetails,
             icon: const Icon(Icons.insights_outlined),
-            label: const Text('View usage details'),
+            label: Text(tr(context, 'View usage details', 'شوف تفاصيل الاستهلاك')),
           ),
+          const SizedBox(height: 10),
+          surface(context, child: ListTile(
+            leading: const Icon(Icons.widgets_outlined),
+            title: Text(tr(context, 'Home screen widget', 'ويدجت الشاشة الرئيسية')),
+            subtitle: Text(widgetInstalled
+              ? tr(context, 'Widget added to your home screen', 'الويدجت اتضاف للشاشة الرئيسية')
+              : tr(context, 'See your data usage without opening the app', 'شوف استهلاك الداتا من غير ما تفتح التطبيق')),
+            trailing: IconButton(
+              tooltip: tr(context, 'Add widget', 'ضيف الويدجت'),
+              onPressed: addWidget,
+              icon: const Icon(Icons.add_to_home_screen),
+            ),
+            onTap: addWidget,
+          )),
+          PlanSummary(settings: monitor, service: usage, today: today, revision: request, onEdit: editPlan),
+          OutlinedButton.icon(
+            onPressed: openReports,
+            icon: const Icon(Icons.analytics_outlined),
+            label: Text(tr(context, 'Compare, filter by date or export', 'قارن الفترات أو اختار تاريخ أو صدّر تقرير')),
+          ),
+          if (data != null && data.apps.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(tr(context, 'Where did the data go?', 'الداتا راحت فين؟'),
+              style: Theme.of(context).textTheme.titleMedium),
+            for (final app in data.apps.take(3))
+              ListTile(
+                dense: true,
+                title: Text(displayAppName(context, app.name)),
+                trailing: Text('${formatBytes(app.bytes)} · ${data.total <= 0 ? '—' :
+                    '${(app.bytes * 100 / data.total).toStringAsFixed(1)}%'}'),
+                onTap: () => openApp(app, today),
+              ),
+          ],
+          if (monitor.pinned.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(tr(context, 'Pinned apps', 'التطبيقات المثبّتة'),
+              style: Theme.of(context).textTheme.titleMedium),
+            for (final pin in monitor.pinned)
+              pinnedTile(context, pin, data),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget pinnedTile(BuildContext context, String pin, NetworkUsage? data) {
+    final todayApp = data?.apps.where((app) => app.identity == pin).firstOrNull;
+    final recentApp = todayApp ?? dailyData!.values
+        .expand((value) => value?.apps ?? <AppUsage>[])
+        .where((app) => app.identity == pin).firstOrNull;
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.push_pin_outlined),
+      title: Text(recentApp?.name ?? pin),
+      subtitle: recentApp?.package == null ? null : Text(recentApp!.package!),
+      trailing: Text(data == null ? '—' : formatBytes(todayApp?.bytes ?? 0)),
+      onTap: recentApp == null ? null : () => openApp(recentApp, today),
+      onLongPress: () => platformAction(() =>
+        saveMonitor(monitor.withPins({...monitor.pinned}..remove(pin)))),
     );
   }
 
@@ -663,18 +849,28 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     final data = dailyData![network];
     final amounts = series;
     final total = periodTotal;
+    final needle = query.trim().toLowerCase();
+    final apps = (data?.apps ?? <AppUsage>[]).where((app) =>
+        (filter == 'all' || (filter == 'system' && app.system == true) ||
+          (filter == 'user' && app.system == false)) &&
+        (app.name.toLowerCase().contains(needle) ||
+          (app.package?.toLowerCase().contains(needle) ?? false))).toList();
+    if (sort == 'name') apps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    if (sort == 'low') apps.sort((a, b) => a.bytes.compareTo(b.bytes));
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 5, 16, 24),
-      itemCount: (data?.apps.length ?? 0) + 1,
+      itemCount: apps.length + 1,
       itemBuilder: (context, index) {
         if (index > 0) {
-          final app = data!.apps[index - 1];
-          return AppRow(
+          final app = apps[index - 1];
+          return InkWell(
+            onTap: () => openApp(app, day),
+            child: AppRow(
             key: ValueKey('${network.name}:${app.package}:${app.name}:$index'),
             app: app, color: accent,
-            total: math.max(data.total, data.apps.first.bytes),
+            total: math.max(data!.total, data.apps.first.bytes),
             service: usage,
-          );
+          ));
         }
         final dates = MaterialLocalizations.of(context);
         return Column(
@@ -687,16 +883,16 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Text('${usageLabel(total)} · ${monthly ? 'Monthly total' : 'Weekly total'}',
+                    child: Text('${usageLabel(total)} · ${monthly ? tr(context, 'Monthly total', 'إجمالي الشهر') : tr(context, 'Weekly total', 'إجمالي الأسبوع')}',
                       style: TextStyle(fontWeight: FontWeight.w700, color: accent)),
                   ),
                   Wrap(
                     spacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      periodButton('Weekly', !monthly),
-                      periodButton('Monthly', monthly),
-                      IconButton(tooltip: 'Pick date', onPressed: chooseDate,
+                      periodButton(tr(context, 'Weekly', 'أسبوعي'), !monthly),
+                      periodButton(tr(context, 'Monthly', 'شهري'), monthly),
+                      IconButton(tooltip: tr(context, 'Pick date', 'اختار تاريخ'), onPressed: chooseDate,
                         icon: const Icon(Icons.calendar_month_outlined)),
                     ],
                   ),
@@ -704,7 +900,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                   Row(
                     children: [
                       IconButton(
-                        tooltip: monthly ? 'Previous month' : 'Previous week',
+                        tooltip: monthly ? tr(context, 'Previous month', 'الشهر السابق') : tr(context, 'Previous week', 'الأسبوع السابق'),
                         icon: const Icon(Icons.chevron_left),
                         onPressed: periodStart.isAfter(monthly
                             ? DateTime(earliest.year, earliest.month) : earliest)
@@ -718,7 +914,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
                         ],
                       )),
                       IconButton(
-                        tooltip: monthly ? 'Next month' : 'Next week',
+                        tooltip: monthly ? tr(context, 'Next month', 'الشهر التالي') : tr(context, 'Next week', 'الأسبوع التالي'),
                         icon: const Icon(Icons.chevron_right),
                         onPressed: periodStart.isBefore(monthly
                             ? DateTime(today.year, today.month) : mondayOf(today))
@@ -737,19 +933,50 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             Wrap(
               spacing: 8,
               children: [
-                ActionChip(label: const Text('Today'), onPressed: () => selectDay(today)),
-                ActionChip(label: const Text('Yesterday'),
+                ActionChip(label: Text(tr(context, 'Today', 'النهارده')), onPressed: () => selectDay(today)),
+                ActionChip(label: Text(tr(context, 'Yesterday', 'امبارح')),
                   onPressed: () => selectDay(calendarDay(today, -1))),
               ],
             ),
             const SizedBox(height: 10),
-            Text('$networkName usage by app', style: Theme.of(context).textTheme.titleMedium),
+            Text(tr(context, '$networkName usage by app', 'استهلاك التطبيقات · $networkName'),
+              style: Theme.of(context).textTheme.titleMedium),
+            if (data != null && data.apps.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              TextFormField(
+                initialValue: query,
+                onChanged: (value) => setState(() => query = value),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: tr(context, 'Search apps or packages', 'ابحث عن اسم تطبيق أو حزمة'),
+                ),
+              ),
+              Wrap(spacing: 8, children: [
+                DropdownButton<String>(
+                  value: filter, onChanged: (value) => setState(() => filter = value ?? 'all'),
+                  items: [
+                    DropdownMenuItem(value: 'all', child: Text(tr(context, 'All apps', 'كل التطبيقات'))),
+                    DropdownMenuItem(value: 'user', child: Text(tr(context, 'Installed apps', 'تطبيقات المستخدم'))),
+                    DropdownMenuItem(value: 'system', child: Text(tr(context, 'System apps', 'تطبيقات النظام'))),
+                  ],
+                ),
+                DropdownButton<String>(
+                  value: sort, onChanged: (value) => setState(() => sort = value ?? 'usage'),
+                  items: [
+                    DropdownMenuItem(value: 'usage', child: Text(tr(context, 'Most used', 'الأعلى استهلاكًا'))),
+                    DropdownMenuItem(value: 'low', child: Text(tr(context, 'Least used', 'الأقل استهلاكًا'))),
+                    DropdownMenuItem(value: 'name', child: Text(tr(context, 'Name', 'الاسم'))),
+                  ],
+                ),
+              ]),
+              if (apps.isEmpty) Text(tr(context, 'No matching apps', 'مفيش تطبيقات مطابقة')),
+            ],
             if (data == null)
               mobileAccessNotice()
             else if (data.apps.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Text('Android has no per-app records for this date and network.',
+                child: Text(tr(context, 'Android has no per-app records for this date and network.', 'أندرويد معندوش سجلات للتطبيقات على الشبكة دي في التاريخ ده.'),
                   style: TextStyle(color: scheme.onSurfaceVariant)),
               ),
           ],
@@ -986,7 +1213,7 @@ class _AppRowState extends State<AppRow> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: Text(widget.app.name, style: const TextStyle(
+                  Expanded(child: Text(displayAppName(context, widget.app.name), style: const TextStyle(
                     fontWeight: FontWeight.w700))),
                   const SizedBox(width: 8),
                   Flexible(child: Text(formatBytes(widget.app.bytes),
@@ -996,6 +1223,8 @@ class _AppRowState extends State<AppRow> {
               ),
               if (widget.app.package case final String name)
                 Text(name, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              Text('↓ ${formatBytes(widget.app.rx)}  ↑ ${formatBytes(widget.app.tx)}',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 7),
               ClipRRect(
                 borderRadius: BorderRadius.circular(9),
@@ -1035,27 +1264,27 @@ class _GoalDialogState extends State<GoalDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Weekly mobile limit'),
+    title: Text(tr(context, 'Weekly mobile limit', 'الحد الأسبوعي للداتا')),
     content: TextField(
       controller: controller,
       autofocus: true,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(labelText: 'Limit (GB)', errorText: error),
+      decoration: InputDecoration(labelText: tr(context, 'Limit (GB)', 'الحد (جيجابايت)'), errorText: error),
     ),
     actions: [
       if (widget.initialBytes > 0)
-        TextButton(onPressed: () => Navigator.pop(context, 0), child: const Text('Remove')),
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, 0), child: Text(tr(context, 'Remove', 'إزالة'))),
+      TextButton(onPressed: () => Navigator.pop(context), child: Text(tr(context, 'Cancel', 'إلغاء'))),
       FilledButton(
         onPressed: () {
           final gb = double.tryParse(controller.text.trim().replaceAll(',', '.'));
           if (gb == null || !gb.isFinite || gb < 0.001 || gb > 100000) {
-            setState(() => error = 'Enter 0.001–100000 GB.');
+            setState(() => error = tr(context, 'Enter 0.001–100000 GB.', 'اكتب قيمة من ٠٫٠٠١ لـ١٠٠٠٠٠ جيجابايت.'));
             return;
           }
           Navigator.pop(context, (gb * 1000000000).round());
         },
-        child: const Text('Save'),
+        child: Text(tr(context, 'Save', 'حفظ')),
       ),
     ],
   );

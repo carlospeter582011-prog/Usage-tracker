@@ -12,6 +12,15 @@ An Android 7+ app built with Flutter and Dart. A Kotlin bridge reads Android's N
 
 Usage includes download and upload. Android controls how often data refreshes and how much history is available, including usage recorded before installation. The device total may differ from the app list because Android provides device-wide totals and user-scoped app breakdowns separately. Shared UIDs are displayed once with one representative package. The usage shown is the total for the shared UID. Usage stays on the device.
 
+## Reports and home screen widget
+
+- Set a mobile data allowance and monthly renewal day. Days beyond the end of a short month use its last day. The plan estimate uses Android's mobile usage and can differ from the carrier's balance.
+- Optional notifications track 50%, 80%, and 100% and unusual mobile data use. Android schedules background checks, so updates and alerts are periodic rather than instantaneous.
+- Open an app row to see daily upload and download totals by network or pin the app to the dashboard. Search and sort by usage or name and filter system and user-installed apps.
+- Choose a custom date range, compare the current week to the same elapsed time last week, or save both networks to CSV through Android's file picker.
+- Tap the widget card on the dashboard to request adding the home screen widget. Launchers that do not offer direct pinning can add it through their widget picker.
+- Choose Arabic or English from Settings.
+
 ## Test advertisements
 
 The app uses Google's sample IDs with the Google Mobile Ads Flutter plugin and GMA Next-Gen Android SDK. A banner can appear above the dashboard after Usage access is granted. The app-open test ad is eligible on returning cold launches. It is skipped if the dashboard becomes ready, the ad fails, or the two-second loading window closes. First launch and foreground resumes do not show an app-open ad.
